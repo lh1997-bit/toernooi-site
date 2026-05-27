@@ -10,12 +10,14 @@ const SUPABASE_AUTH_SCOPE = {
   autoRefreshToken: true,
   detectSessionInUrl: false,
 };
+const RESERVED_PUBLIC_SLUGS = new Set(["admin-inlog", "deelnemers", "deelnemers.html", "api", "index.html"]);
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: SUPABASE_AUTH_SCOPE,
 });
 
 const APP_MODE = location.pathname.toLowerCase().startsWith("/admin-inlog") ? "admin" : "participant";
+const PUBLIC_TOURNAMENT_SLUG = APP_MODE === "participant" ? getParticipantRouteSlug() : "";
 
 document.body.classList.toggle("participant-mode", APP_MODE === "participant");
 document.body.classList.toggle("admin-mode", APP_MODE !== "participant");
@@ -23,6 +25,7 @@ document.title = APP_MODE === "participant" ? "Toernooimaker - Deelnemers" : "To
 
 const defaultState = () => ({
   id: "tournament-1",
+  slug: "",
   nextId: 1,
   updatedAt: 0,
   settings: {
@@ -64,6 +67,79 @@ function defaultProgramState() {
     activeTournamentId: "tournament-1",
     tournaments: [defaultState()],
   };
+}
+
+function slugifyTournamentName(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " en ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+}
+
+function getParticipantRouteSlug(pathname = location.pathname) {
+  const normalized = String(pathname || "").trim().toLowerCase();
+  if (!normalized || normalized === "/" || normalized === "/index.html" || normalized === "/deelnemers.html") {
+    return "";
+  }
+
+  const trimmed = normalized.replace(/^\/+|\/+$/g, "");
+  const [firstSegment] = trimmed.split("/");
+  if (!firstSegment || RESERVED_PUBLIC_SLUGS.has(firstSegment)) {
+    return "";
+  }
+
+  try {
+    return decodeURIComponent(firstSegment);
+  } catch {
+    return firstSegment;
+  }
+}
+
+function getTournamentSlug(name, tournamentId, tournaments = program.tournaments) {
+  let base = slugifyTournamentName(name) || `toernooi-${String(tournamentId || "").replace(/[^a-z0-9]+/gi, "-") || "1"}`;
+  if (RESERVED_PUBLIC_SLUGS.has(base)) {
+    base = `toernooi-${base}`;
+  }
+  let slug = base;
+  let counter = 2;
+  while (RESERVED_PUBLIC_SLUGS.has(slug) || tournaments.some((tournament) => tournament.id !== tournamentId && tournament.slug === slug)) {
+    slug = `${base}-${counter}`;
+    counter += 1;
+  }
+  return slug;
+}
+
+function syncTournamentSlugFromName(tournament = state) {
+  if (!tournament) return;
+  tournament.slug = getTournamentSlug(tournament.settings?.name, tournament.id, program.tournaments);
+}
+
+function ensureTournamentSlugs(tournaments = program.tournaments) {
+  tournaments.forEach((tournament, index) => {
+    if (!tournament) return;
+    const baseName = tournament.settings?.name || `Toernooi ${index + 1}`;
+    tournament.slug = getTournamentSlug(tournament.slug || baseName, tournament.id, tournaments);
+  });
+  return tournaments;
+}
+
+function getTournamentPublicPath(tournament) {
+  return `/${encodeURIComponent(tournament?.slug || "")}`;
+}
+
+function getParticipantTournament(programState = program) {
+  const tournaments = Array.isArray(programState.tournaments) ? programState.tournaments : [];
+  if (PUBLIC_TOURNAMENT_SLUG) {
+    return tournaments.find((tournament) => tournament.slug === PUBLIC_TOURNAMENT_SLUG) || (tournaments.length === 1 ? tournaments[0] : null);
+  }
+  if (tournaments.length === 1) {
+    return tournaments[0];
+  }
+  return null;
 }
 
 let program = defaultProgramState();
@@ -158,6 +234,7 @@ function normalizeProgramState(loaded) {
   const tournaments = Array.isArray(loaded.tournaments) && loaded.tournaments.length
     ? loaded.tournaments.map((tournament, index) => normalizeTournamentState(tournament, tournament.id || `tournament-${index + 1}`))
     : fresh.tournaments;
+  ensureTournamentSlugs(tournaments);
   const activeTournamentId = tournaments.some((tournament) => tournament.id === loaded.activeTournamentId)
     ? loaded.activeTournamentId
     : tournaments[0]?.id || fresh.activeTournamentId;
@@ -177,6 +254,7 @@ function normalizeTournamentState(loaded, idFallback) {
     ...fresh,
     ...loaded,
     id: idFallback || loaded?.id || fresh.id,
+    slug: loaded?.slug || slugifyTournamentName(loaded?.settings?.name || idFallback || fresh.id),
     teams: Array.isArray(loaded.teams) && loaded.teams.length ? loaded.teams : fresh.teams,
     activeView: loaded.activeView || fresh.activeView,
     locked: Boolean(loaded.locked),
@@ -379,6 +457,11 @@ async function bootstrapRemoteState() {
 }
 
 function getActiveTournamentState(programState = program) {
+  if (APP_MODE === "participant" && PUBLIC_TOURNAMENT_SLUG) {
+    const matchedTournament = getParticipantTournament(programState);
+    if (matchedTournament) return matchedTournament;
+  }
+
   const tournamentId = programState.activeTournamentId || programState.tournaments[0]?.id;
   return programState.tournaments.find((tournament) => tournament.id === tournamentId) || programState.tournaments[0] || defaultState();
 }
@@ -391,6 +474,7 @@ function syncActiveTournamentToProgram() {
   } else {
     program.tournaments[index] = state;
   }
+  ensureTournamentSlugs(program.tournaments);
 }
 
 function createTournamentState(id, overrides = {}) {
@@ -437,7 +521,9 @@ function addTournament() {
       name: `Toernooi ${program.tournaments.length + 1}`,
     },
   });
+  ensureTournamentSlugs(program.tournaments);
   program.tournaments.push(newTournament);
+  syncTournamentSlugFromName(newTournament);
   program.activeTournamentId = newTournament.id;
   state = newTournament;
   state.activeView = "program";
@@ -457,6 +543,8 @@ function duplicateTournament() {
   copy.settings.name = `${state.settings.name} kopie`;
   copy.updatedAt = 0;
   program.tournaments.push(copy);
+  ensureTournamentSlugs(program.tournaments);
+  syncTournamentSlugFromName(copy);
   program.activeTournamentId = copy.id;
   state = copy;
   state.activeView = "program";
@@ -1130,6 +1218,7 @@ function renderTeamFields() {
 
 function renderTournament() {
   const tournament = state.tournament;
+  const participantTournament = APP_MODE === "participant" ? getParticipantTournament(program) : tournament;
   const knockoutFocus = state.activeView === "knockout" && APP_MODE === "admin";
   document.body.classList.toggle("knockout-focus", knockoutFocus);
   if (elements.setupPanel) {
@@ -1146,6 +1235,59 @@ function renderTournament() {
     return;
   }
 
+  if (APP_MODE === "participant") {
+    state.activeView = "team";
+    renderTabs();
+
+    if (!program.tournaments.length) {
+      elements.workspaceTitle.textContent = "Maak je toernooi";
+      elements.workspaceFormat.textContent = "Geen schema";
+      elements.tournamentContent.innerHTML = `
+        <div class="empty-state">
+          <div>
+            <h3>Nog niets gepubliceerd</h3>
+            <p>Er is nog geen toernooi beschikbaar. Ga naar de admin-pagina om een toernooi te maken.</p>
+            <p><a class="inline-link" href="/admin-inlog">Naar admin</a></p>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
+    if (!participantTournament) {
+      elements.workspaceTitle.textContent = "Toernooien";
+      elements.workspaceFormat.textContent = `${program.tournaments.length} toernooi${program.tournaments.length === 1 ? "" : "en"}`;
+      elements.tournamentContent.innerHTML = `
+        <div class="empty-state">
+          <div>
+            <h3>Toernooi niet gevonden</h3>
+            <p>De link die je opent hoort niet bij een bekend toernooi. Kies hieronder een geldig toernooi of ga terug naar het overzicht.</p>
+            <p><a class="inline-link" href="/">Terug naar overzicht</a></p>
+          </div>
+        </div>
+        ${renderParticipantDirectory()}
+      `;
+      return;
+    }
+
+    if (!PUBLIC_TOURNAMENT_SLUG && program.tournaments.length > 1) {
+      elements.workspaceTitle.textContent = "Toernooien";
+      elements.workspaceFormat.textContent = `${program.tournaments.length} toernooi${program.tournaments.length === 1 ? "" : "en"}`;
+      elements.tournamentContent.innerHTML = renderParticipantDirectory();
+      return;
+    }
+
+    currentSchedule = buildScheduleMap(participantTournament);
+    elements.workspaceTitle.textContent = participantTournament.settings?.name || "Maak je toernooi";
+    elements.workspaceFormat.textContent = participantTournament
+      ? participantTournament.format === "groups"
+        ? "Poules met knock-out"
+        : "Leaguefase met knock-out"
+      : "Geen schema";
+    elements.tournamentContent.innerHTML = renderTeamView(participantTournament);
+    return;
+  }
+
   currentSchedule = buildScheduleMap(tournament);
   elements.workspaceTitle.textContent = tournament?.name || "Maak je toernooi";
   elements.workspaceFormat.textContent = tournament
@@ -1155,25 +1297,6 @@ function renderTournament() {
     : "Geen schema";
 
   renderTabs();
-
-  if (APP_MODE === "participant") {
-    state.activeView = "team";
-    if (!tournament) {
-      elements.tournamentContent.innerHTML = `
-        <div class="empty-state">
-          <div>
-            <h3>Nog niets gepubliceerd</h3>
-            <p>Er is nog geen toernooi in deze browser opgeslagen. Ga naar de admin-pagina om een toernooi te maken en terug te komen naar de deelnemerspagina.</p>
-            <p><a class="inline-link" href="/admin-inlog">Naar admin</a></p>
-          </div>
-        </div>
-      `;
-      return;
-    }
-
-    elements.tournamentContent.innerHTML = renderTeamView(tournament);
-    return;
-  }
 
   if (!tournament) {
     elements.tournamentContent.innerHTML = `
@@ -1279,12 +1402,14 @@ function renderProgramTournamentCard(tournament, index) {
   const fieldStart = Number(tournament.settings?.fieldStart) || 1;
   const fieldEnd = fieldStart + Math.max(1, Number(tournament.settings?.fieldCount) || 1) - 1;
   const selected = tournament.id === program.activeTournamentId;
+  const publicPath = getTournamentPublicPath(tournament);
 
   return `
     <article class="program-tournament ${selected ? "is-active" : ""}">
       <div>
         <strong>${escapeHtml(tournament.settings?.name?.trim() || `Toernooi ${index + 1}`)}</strong>
         <p>${escapeHtml(tournament.settings?.format === "groups" ? "Poules met knock-out" : "Leaguefase met knock-out")}</p>
+        <p><a class="inline-link" href="${escapeHtml(publicPath)}" target="_blank" rel="noreferrer">${escapeHtml(publicPath)}</a></p>
       </div>
       <div class="program-tournament-meta">
         <span>${totalMatches} wedstrijden</span>
@@ -1385,6 +1510,60 @@ function renderProgramView() {
             <h3>Gecombineerd schema</h3>
           </div>
           ${renderProgramSchedule(programRows)}
+        </section>
+      </div>
+    </div>
+  `;
+}
+
+function renderParticipantDirectory() {
+  if (!program.tournaments.length) {
+    return `
+      <div class="empty-state">
+        <div>
+          <h3>Nog niets gepubliceerd</h3>
+          <p>Er zijn nog geen toernooien beschikbaar.</p>
+        </div>
+      </div>
+    `;
+  }
+
+  const cards = program.tournaments
+    .map((tournament, index) => {
+      const totalMatches = getTournamentMatchCount(tournament);
+      const fieldStart = Number(tournament.settings?.fieldStart) || 1;
+      const fieldEnd = fieldStart + Math.max(1, Number(tournament.settings?.fieldCount) || 1) - 1;
+      const publicPath = getTournamentPublicPath(tournament);
+      const label = tournament.settings?.format === "groups" ? "Poules met knock-out" : "Leaguefase met knock-out";
+
+      return `
+        <article class="program-tournament">
+          <div>
+            <strong>${escapeHtml(tournament.settings?.name?.trim() || `Toernooi ${index + 1}`)}</strong>
+            <p>${escapeHtml(label)}</p>
+            <p><a class="inline-link" href="${escapeHtml(publicPath)}">${escapeHtml(publicPath)}</a></p>
+          </div>
+          <div class="program-tournament-meta">
+            <span>${totalMatches} wedstrijden</span>
+            <span>Veld ${fieldStart}-${fieldEnd}</span>
+          </div>
+          <a class="secondary-button" href="${escapeHtml(publicPath)}">Openen</a>
+        </article>
+      `;
+    })
+    .join("");
+
+  return `
+    <div class="program-overview">
+      <div class="program-layout">
+        <section class="stage-card program-card-list">
+          <div class="section-head">
+            <h3>Toernooien</h3>
+            <div class="section-actions">
+              <span>${program.tournaments.length} toernooi${program.tournaments.length === 1 ? "" : "en"}</span>
+            </div>
+          </div>
+          <div class="program-tournament-list">${cards}</div>
         </section>
       </div>
     </div>
@@ -3700,7 +3879,9 @@ document.addEventListener("click", (event) => {
 if (elements.tournamentName) {
   elements.tournamentName.addEventListener("input", (event) => {
     state.settings.name = event.target.value;
+    syncTournamentSlugFromName();
     persist();
+    renderAll();
   });
 }
 
