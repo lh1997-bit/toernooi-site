@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/admin-inlog",
+      "destination": "/admin-inlog/index.html"
+    },
+    {
+      "source": "/deelnemers",
+      "destination": "/index.html"
+    }
+  ]
+}

@@ -15,7 +15,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: SUPABASE_AUTH_SCOPE,
 });
 
-const APP_MODE = location.pathname.toLowerCase().endsWith("/deelnemers.html") ? "participant" : "admin";
+const APP_MODE = location.pathname.toLowerCase().startsWith("/admin-inlog") ? "admin" : "participant";
 
 document.body.classList.toggle("participant-mode", APP_MODE === "participant");
 document.body.classList.toggle("admin-mode", APP_MODE !== "participant");
@@ -1086,6 +1086,7 @@ function planTournamentSchedule() {
 }
 
 function renderSetup() {
+  if (APP_MODE === "participant" || !elements.setupPanel) return;
   normalizeSettings();
   renderTournamentPicker();
   const locked = Boolean(state.locked);
@@ -1211,7 +1212,7 @@ function renderTournament() {
           <div>
             <h3>Nog niets gepubliceerd</h3>
             <p>Er is nog geen toernooi in deze browser opgeslagen. Ga naar de admin-pagina om een toernooi te maken en terug te komen naar de deelnemerspagina.</p>
-            <p><a class="inline-link" href="./">Naar admin</a></p>
+            <p><a class="inline-link" href="/admin-inlog">Naar admin</a></p>
           </div>
         </div>
       `;
