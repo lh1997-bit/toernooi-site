@@ -29,6 +29,27 @@
 
     <main class="app-shell">
       <aside class="setup-panel" aria-label="Toernooi instellingen">
+        <section class="panel auth-panel" id="authPanel">
+          <div class="panel-heading">
+            <h2>Admin toegang</h2>
+            <span id="authStatus" class="auth-status">Niet ingelogd</span>
+          </div>
+          <div class="auth-grid">
+            <label class="field">
+              <span>E-mail</span>
+              <input id="authEmail" type="email" autocomplete="username" />
+            </label>
+            <label class="field">
+              <span>Wachtwoord</span>
+              <input id="authPassword" type="password" autocomplete="current-password" />
+            </label>
+            <div class="button-row auth-actions">
+              <button class="primary-button" id="authSignIn" type="button">Inloggen</button>
+              <button class="secondary-button" id="authSignOut" type="button">Uitloggen</button>
+            </div>
+          </div>
+        </section>
+
         <section class="panel">
           <div class="panel-heading">
             <h2>Instellingen</h2>
@@ -151,6 +172,6 @@
       </section>
     </main>
 
-    <script src="app.js"></script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>

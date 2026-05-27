@@ -1,6 +1,20 @@
-const ADMIN_STORAGE_KEY = "toernooimaker-admin-state-v1";
-const PUBLIC_STORAGE_KEY = "toernooimaker-public-state-v1";
-const LEGACY_STORAGE_KEY = "toernooimaker-state-v1";
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+const SUPABASE_URL = "https://xtjvnnpofngocnpafbsm.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh0anZubnBvZm5nb2NucGFmYnNtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk4Nzc1MDUsImV4cCI6MjA5NTQ1MzUwNX0.0B7AUJiRpV2HlwmYjQemIHzda0OV-DikAuIcpqtMLEo";
+const PROGRAM_TABLE = "program_state";
+const ADMIN_TABLE = "admin_users";
+const PROGRAM_ROW_ID = "main";
+const SUPABASE_AUTH_SCOPE = {
+  persistSession: false,
+  autoRefreshToken: false,
+  detectSessionInUrl: false,
+};
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: SUPABASE_AUTH_SCOPE,
+});
+
 const APP_MODE = location.pathname.toLowerCase().endsWith("/deelnemers.html") ? "participant" : "admin";
 
 document.body.classList.toggle("participant-mode", APP_MODE === "participant");
@@ -52,14 +66,26 @@ function defaultProgramState() {
   };
 }
 
-let program = loadProgramState();
+let program = defaultProgramState();
 let state = getActiveTournamentState(program);
 let currentSchedule = new Map();
 let validationReport = null;
+let adminSession = null;
+let remoteReady = false;
+let remoteRevision = 0;
+let remoteSubscription = null;
+let saveTimer = null;
+let applyingRemoteState = false;
 
 const elements = {
   setupPanel: document.querySelector(".setup-panel"),
   appShell: document.querySelector(".app-shell"),
+  authPanel: document.querySelector("#authPanel"),
+  authStatus: document.querySelector("#authStatus"),
+  authEmail: document.querySelector("#authEmail"),
+  authPassword: document.querySelector("#authPassword"),
+  authSignIn: document.querySelector("#authSignIn"),
+  authSignOut: document.querySelector("#authSignOut"),
   tournamentPicker: document.querySelector("#tournamentPicker"),
   addTournamentButton: document.querySelector("#addTournamentButton"),
   duplicateTournamentButton: document.querySelector("#duplicateTournamentButton"),
@@ -103,48 +129,24 @@ const elements = {
   tournamentContent: document.querySelector("#tournamentContent"),
 };
 
-function loadProgramState() {
+async function loadProgramState() {
   try {
-    const adminRaw = localStorage.getItem(ADMIN_STORAGE_KEY);
-    if (adminRaw) {
-      try {
-        const parsed = JSON.parse(adminRaw);
-        if (parsed && Array.isArray(parsed.tournaments)) {
-          return normalizeProgramState(parsed);
-        }
-      } catch {
-        // fall through to legacy inputs
-      }
-    }
+    const { data, error } = await supabase
+      .from(PROGRAM_TABLE)
+      .select("id,payload,updated_at")
+      .eq("id", PROGRAM_ROW_ID)
+      .maybeSingle();
 
-    const candidates = [PUBLIC_STORAGE_KEY, LEGACY_STORAGE_KEY]
-      .map((key) => {
-        const raw = localStorage.getItem(key);
-        if (!raw) return null;
-        try {
-          const parsed = JSON.parse(raw);
-          return {
-            key,
-            parsed,
-            updatedAt: Number(parsed?.updatedAt) || 0,
-          };
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean);
+    if (error) throw error;
+    if (!data?.payload) return { program: defaultProgramState(), revision: 0 };
 
-    if (!candidates.length) return defaultProgramState();
-
-    candidates.sort((a, b) => b.updatedAt - a.updatedAt);
-    const latest = candidates[0];
-    return normalizeProgramState({
-      ...defaultProgramState(),
-      updatedAt: latest.updatedAt,
-      tournaments: [normalizeTournamentState(latest.parsed, "tournament-1")],
-    });
+    const revision = Number(new Date(data.updated_at)) || Number(data.payload?.updatedAt) || 0;
+    return {
+      program: normalizeProgramState(data.payload),
+      revision,
+    };
   } catch {
-    return defaultProgramState();
+    return { program: defaultProgramState(), revision: 0 };
   }
 }
 
@@ -189,27 +191,204 @@ function persist() {
   syncActiveTournamentToProgram();
   program.updatedAt = Date.now();
   state.updatedAt = program.updatedAt;
-  const adminPayload = JSON.stringify(program);
-  const activePayload = JSON.stringify(state);
-  localStorage.setItem(ADMIN_STORAGE_KEY, adminPayload);
-  localStorage.setItem(PUBLIC_STORAGE_KEY, activePayload);
-  localStorage.setItem(LEGACY_STORAGE_KEY, activePayload);
+  if (!remoteReady || applyingRemoteState || APP_MODE === "participant") return;
+  queueProgramSave();
 }
 
 function publishTournament() {
-  syncActiveTournamentToProgram();
-  state.updatedAt = Date.now();
-  localStorage.setItem(PUBLIC_STORAGE_KEY, JSON.stringify(state));
-  localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(state));
+  persist();
 }
 
-window.addEventListener("storage", (event) => {
-  if (event.key !== ADMIN_STORAGE_KEY && event.key !== PUBLIC_STORAGE_KEY && event.key !== LEGACY_STORAGE_KEY) return;
-  program = loadProgramState();
-  state = getActiveTournamentState(program);
-  normalizeSettings();
-  renderAll();
-});
+function isEditingEnabled() {
+  return APP_MODE !== "participant" && Boolean(adminSession) && !state.locked;
+}
+
+function updateAuthUi() {
+  const email = adminSession?.user?.email || "";
+  if (elements.authStatus) {
+    elements.authStatus.textContent = adminSession
+      ? `Ingelogd als ${email || "admin"}`
+      : "Niet ingelogd";
+  }
+  if (elements.authSignIn) elements.authSignIn.hidden = Boolean(adminSession);
+  if (elements.authSignOut) elements.authSignOut.hidden = !adminSession;
+  if (elements.authEmail) elements.authEmail.disabled = Boolean(adminSession);
+  if (elements.authPassword) elements.authPassword.disabled = Boolean(adminSession);
+  updateWriteGate();
+}
+
+function updateWriteGate() {
+  if (APP_MODE === "participant") return;
+  const canEdit = isEditingEnabled();
+  document.body.classList.toggle("admin-readonly", !canEdit);
+
+  const protectedControls = document.querySelectorAll(
+    ".header-actions button, .header-actions select, .setup-panel input, .setup-panel select, .setup-panel textarea, .setup-panel button, .tournament-content input, .tournament-content select, .tournament-content textarea, .tournament-content button",
+  );
+
+  protectedControls.forEach((control) => {
+    if (
+      control.id === "authEmail" ||
+      control.id === "authPassword" ||
+      control.id === "authSignIn" ||
+      control.id === "authSignOut"
+    ) {
+      control.disabled = false;
+      return;
+    }
+
+    if (control.id === "lockButton") {
+      control.disabled = !adminSession;
+      return;
+    }
+
+    if (control.closest(".view-tabs")) return;
+    control.disabled = !canEdit;
+  });
+}
+
+function queueProgramSave() {
+  if (APP_MODE === "participant") return;
+  window.clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(() => {
+    void saveProgramToServer();
+  }, 250);
+}
+
+async function saveProgramToServer() {
+  if (!adminSession?.access_token) {
+    showStatus("Log in als admin om wijzigingen op te slaan.");
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/state", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${adminSession.access_token}`,
+      },
+      body: JSON.stringify({ program }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Opslaan mislukt (${response.status})`);
+    }
+
+    const saved = await response.json();
+    remoteRevision = Number(new Date(saved.updated_at)) || remoteRevision;
+    showStatus("Wijzigingen opgeslagen.");
+  } catch (error) {
+    showStatus(`Opslaan mislukt. ${error?.message || "Controleer je verbinding."}`);
+  }
+}
+
+function applyRemoteProgram(loadedProgram, revision = 0) {
+  applyingRemoteState = true;
+  try {
+    program = normalizeProgramState(loadedProgram);
+    state = getActiveTournamentState(program);
+    remoteRevision = Math.max(remoteRevision, revision || 0, Number(program.updatedAt) || 0);
+    normalizeSettings();
+    renderAll();
+  } finally {
+    applyingRemoteState = false;
+  }
+}
+
+async function refreshRemoteProgram() {
+  if (remoteReady === false && APP_MODE !== "participant") return;
+  try {
+    const loaded = await loadProgramState();
+    applyRemoteProgram(loaded.program, loaded.revision);
+  } catch (error) {
+    showStatus(`Servergegevens laden mislukt. ${error?.message || ""}`.trim());
+  }
+}
+
+function subscribeToRemoteProgram() {
+  if (remoteSubscription) {
+    supabase.removeChannel(remoteSubscription);
+  }
+
+  remoteSubscription = supabase
+    .channel("program-state-live")
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: PROGRAM_TABLE,
+        filter: `id=eq.${PROGRAM_ROW_ID}`,
+      },
+      (payload) => {
+        const incoming = payload.new?.payload;
+        if (!incoming) return;
+        const revision = Number(new Date(payload.new?.updated_at)) || Number(incoming.updatedAt) || 0;
+        if (revision && revision <= remoteRevision) return;
+        applyRemoteProgram(incoming, revision);
+      },
+    )
+    .subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        showStatus("Realtime verbinding actief.");
+      }
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        showStatus("Realtime verbinding hapert. We proberen opnieuw te verbinden.");
+      }
+    });
+}
+
+async function verifyAdminSession(session) {
+  if (!session?.access_token) return false;
+  try {
+    const response = await fetch("/api/admin-status", {
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    });
+
+    if (!response.ok) return false;
+    const result = await response.json();
+    return Boolean(result?.isAdmin);
+  } catch {
+    return false;
+  }
+}
+
+async function syncAuthSession() {
+  const { data } = await supabase.auth.getSession();
+  const session = data?.session || null;
+  if (!session) {
+    adminSession = null;
+    updateAuthUi();
+    return;
+  }
+
+  const isAdmin = await verifyAdminSession(session);
+  adminSession = isAdmin ? session : null;
+  if (!isAdmin) {
+    showStatus("Deze account heeft geen beheerrechten.");
+  }
+  updateAuthUi();
+}
+
+async function bootstrapRemoteState() {
+  if (APP_MODE === "participant") {
+    const loaded = await loadProgramState();
+    applyRemoteProgram(loaded.program, loaded.revision);
+    remoteReady = true;
+    subscribeToRemoteProgram();
+    return;
+  }
+
+  await syncAuthSession();
+  const loaded = await loadProgramState();
+  applyRemoteProgram(loaded.program, loaded.revision);
+  remoteReady = true;
+  subscribeToRemoteProgram();
+  updateAuthUi();
+}
 
 function getActiveTournamentState(programState = program) {
   const tournamentId = programState.activeTournamentId || programState.tournaments[0]?.id;
@@ -3441,6 +3620,8 @@ function showStatus(message) {
 function renderAll() {
   renderSetup();
   renderTournament();
+  updateAuthUi();
+  updateWriteGate();
 }
 
 function applyLeagueDefaultsForTeamCount() {
@@ -3733,6 +3914,64 @@ if (elements.deleteTournamentButton) {
   elements.deleteTournamentButton.addEventListener("click", deleteTournament);
 }
 
+if (elements.authSignIn) {
+  elements.authSignIn.addEventListener("click", async () => {
+    const email = elements.authEmail?.value.trim();
+    const password = elements.authPassword?.value || "";
+    if (!email || !password) {
+      showStatus("Vul je admin e-mail en wachtwoord in.");
+      return;
+    }
+
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error || !data?.session) {
+      showStatus(error?.message || "Inloggen is niet gelukt.");
+      return;
+    }
+
+    const isAdmin = await verifyAdminSession(data.session);
+    if (!isAdmin) {
+      await supabase.auth.signOut();
+      showStatus("Deze account heeft geen beheerrechten.");
+      return;
+    }
+
+    adminSession = data.session;
+    updateAuthUi();
+    void refreshRemoteProgram();
+    showStatus("Beheerder ingelogd.");
+  });
+}
+
+if (elements.authSignOut) {
+  elements.authSignOut.addEventListener("click", async () => {
+    window.clearTimeout(saveTimer);
+    await supabase.auth.signOut();
+    adminSession = null;
+    updateAuthUi();
+    void refreshRemoteProgram();
+    showStatus("Uitgelogd.");
+  });
+}
+
+supabase.auth.onAuthStateChange((_event, session) => {
+  if (!session) {
+    window.clearTimeout(saveTimer);
+    adminSession = null;
+    updateAuthUi();
+    void refreshRemoteProgram();
+  }
+});
+
+window.addEventListener("online", () => {
+  subscribeToRemoteProgram();
+  void refreshRemoteProgram();
+});
+
+window.addEventListener("focus", () => {
+  void refreshRemoteProgram();
+});
+
 document.addEventListener("input", (event) => {
   const roundInput = event.target.closest(".round-name-input");
   if (!roundInput) return;
@@ -3857,3 +4096,4 @@ elements.tournamentContent.addEventListener("change", (event) => {
 });
 
 renderAll();
+void bootstrapRemoteState();

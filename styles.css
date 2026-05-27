@@ -43,6 +43,30 @@ body.participant-mode .workspace {
   grid-column: 1 / -1;
 }
 
+body.admin-readonly .header-actions button,
+body.admin-readonly .setup-panel input:not(#authEmail):not(#authPassword),
+body.admin-readonly .setup-panel select,
+body.admin-readonly .setup-panel textarea,
+body.admin-readonly .setup-panel button:not(#authSignIn):not(#authSignOut):not(#lockButton),
+body.admin-readonly .tournament-content input,
+body.admin-readonly .tournament-content select,
+body.admin-readonly .tournament-content textarea,
+body.admin-readonly .tournament-content button {
+  cursor: not-allowed;
+}
+
+body.admin-readonly .header-actions button:disabled,
+body.admin-readonly .setup-panel input:disabled,
+body.admin-readonly .setup-panel select:disabled,
+body.admin-readonly .setup-panel textarea:disabled,
+body.admin-readonly .setup-panel button:disabled,
+body.admin-readonly .tournament-content input:disabled,
+body.admin-readonly .tournament-content select:disabled,
+body.admin-readonly .tournament-content textarea:disabled,
+body.admin-readonly .tournament-content button:disabled {
+  opacity: 0.55;
+}
+
 body.knockout-focus .setup-panel {
   display: none;
 }
@@ -144,6 +168,26 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.auth-panel .panel-heading {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.auth-status {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.auth-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-actions {
+  margin-top: 2px;
 }
 
 .app-shell {
