@@ -203,38 +203,12 @@ function publishTournament() {
 }
 
 function isEditingEnabled() {
-  return APP_MODE !== "participant" && Boolean(adminSession) && !state.locked;
-}
-
-function setAuthStatus(message) {
-  authNotice = message;
-  updateAuthUi();
-}
-
-function setAuthBusy(nextBusy) {
-  authBusy = Boolean(nextBusy);
-  updateAuthUi();
+  return APP_MODE !== "participant" && !state.locked;
 }
 
 function updateAuthUi() {
-  const email = adminSession?.user?.email || "";
-  if (elements.authStatus) {
-    elements.authStatus.textContent = authBusy
-      ? "Aanmelden..."
-      : adminSession
-      ? `Ingelogd als ${email || "admin"}`
-      : authNotice || "Niet ingelogd";
-  }
-  if (elements.authSignIn) {
-    elements.authSignIn.hidden = Boolean(adminSession);
-    elements.authSignIn.disabled = authBusy;
-  }
-  if (elements.authSignOut) {
-    elements.authSignOut.hidden = !adminSession;
-    elements.authSignOut.disabled = authBusy || !adminSession;
-  }
-  if (elements.authEmail) elements.authEmail.disabled = Boolean(adminSession) || authBusy;
-  if (elements.authPassword) elements.authPassword.disabled = Boolean(adminSession) || authBusy;
+  if (!elements.authStatus) return;
+  elements.authStatus.textContent = APP_MODE === "participant" ? "Alleen lezen" : "Beheerder";
   updateWriteGate();
 }
 
@@ -248,21 +222,6 @@ function updateWriteGate() {
   );
 
   protectedControls.forEach((control) => {
-    if (
-      control.id === "authEmail" ||
-      control.id === "authPassword" ||
-      control.id === "authSignIn" ||
-      control.id === "authSignOut"
-    ) {
-      control.disabled = false;
-      return;
-    }
-
-    if (control.id === "lockButton") {
-      control.disabled = !adminSession;
-      return;
-    }
-
     if (control.closest(".view-tabs")) return;
     control.disabled = !canEdit;
   });
@@ -277,17 +236,11 @@ function queueProgramSave() {
 }
 
 async function saveProgramToServer() {
-  if (!adminSession?.access_token) {
-    showStatus("Log in als admin om wijzigingen op te slaan.");
-    return;
-  }
-
   try {
     const response = await fetch("/api/state", {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${adminSession.access_token}`,
       },
       body: JSON.stringify({ program }),
     });
@@ -418,7 +371,6 @@ async function bootstrapRemoteState() {
     return;
   }
 
-  await syncAuthSession();
   const loaded = await loadProgramState();
   applyRemoteProgram(loaded.program, loaded.revision);
   remoteReady = true;
@@ -3051,10 +3003,6 @@ function collectScheduledBlocks(tournament) {
   return blocks;
 }
 
-function isDoubleKnockoutContainer(bracket) {
-  return Boolean(bracket && bracket.kind === "double");
-}
-
 function splitKnockoutSeeds(seedIds) {
   const winnersSize = Math.ceil(seedIds.length / 2);
   return {
@@ -3257,23 +3205,6 @@ function collectBracketBlocks(bracket, prefix) {
 
 function isDoubleKnockoutContainer(bracket) {
   return Boolean(bracket && bracket.kind === "double");
-}
-
-function splitKnockoutSeeds(seedIds) {
-  const winnersSize = Math.ceil(seedIds.length / 2);
-  return {
-    winners: seedIds.slice(0, winnersSize),
-    losers: seedIds.slice(winnersSize),
-  };
-}
-
-function createDoubleKnockoutBracket(seedIds, prefix = "knockout") {
-  const split = splitKnockoutSeeds(seedIds);
-  return {
-    kind: "double",
-    winners: createKnockoutBracket(split.winners, `${prefix}-winners`),
-    losers: split.losers.length ? createKnockoutBracket(split.losers, `${prefix}-losers`) : null,
-  };
 }
 
 function generateGroupKnockout() {
@@ -3997,35 +3928,6 @@ async function handleAdminLogin(event) {
     setAuthBusy(false);
   }
 }
-
-if (elements.authForm) {
-  elements.authForm.addEventListener("submit", handleAdminLogin);
-}
-
-if (elements.authSignIn && !elements.authForm) {
-  elements.authSignIn.addEventListener("click", handleAdminLogin);
-}
-
-if (elements.authSignOut) {
-  elements.authSignOut.addEventListener("click", async () => {
-    window.clearTimeout(saveTimer);
-    await supabase.auth.signOut();
-    adminSession = null;
-    authNotice = "Uitgelogd";
-    updateAuthUi();
-    void refreshRemoteProgram();
-    showStatus("Uitgelogd.");
-  });
-}
-
-supabase.auth.onAuthStateChange((_event, session) => {
-  if (!session) {
-    window.clearTimeout(saveTimer);
-    adminSession = null;
-    updateAuthUi();
-    void refreshRemoteProgram();
-  }
-});
 
 window.addEventListener("online", () => {
   subscribeToRemoteProgram();

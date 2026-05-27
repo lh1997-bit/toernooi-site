@@ -10,13 +10,8 @@ Then set these Vercel environment variables for the serverless routes:
 - optional: `SUPABASE_ADMIN_TABLE` if you want a different admin table name
 - optional: `SUPABASE_PROGRAM_ROW_ID` if you want a different main row id
 
-Admin access uses Supabase Auth:
-
-1. Create the admin account in Supabase Auth.
-2. Insert that user into `public.admin_users` with `active = true`.
-3. Sign in on the admin page at `/admin-inlog` with that email and password.
-
-The browser reads `public.program_state` directly and subscribes to Realtime changes.
-Admin writes go through `/api/state`.
+The admin page is now a direct editing workspace at `/admin-inlog`.
+It writes through `/api/state` and the public frontend reads `public.program_state` directly.
+Realtime subscriptions still keep all browsers in sync.
 
 Public frontend is served from `/`.

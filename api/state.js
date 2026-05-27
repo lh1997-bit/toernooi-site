@@ -1,6 +1,5 @@
 const {
   json,
-  isAdminUser,
   readJsonBody,
   readProgramRow,
   writeProgramRow,
@@ -22,19 +21,6 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    const authHeader = req.headers.authorization || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
-    if (!token) {
-      json(res, 401, { error: "Missing admin token." });
-      return;
-    }
-
-    const access = await isAdminUser(token);
-    if (!access.isAdmin) {
-      json(res, 403, { error: "Admin access required." });
-      return;
-    }
-
     const body = await readJsonBody(req);
     const program = body?.program || body?.state || null;
     if (!program || typeof program !== "object") {
@@ -42,7 +28,7 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    const row = await writeProgramRow(program, access.user);
+    const row = await writeProgramRow(program, null);
     json(res, 200, {
       program: row?.payload || program,
       updated_at: row?.updated_at || new Date().toISOString(),
