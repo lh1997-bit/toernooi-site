@@ -6,8 +6,8 @@ const PROGRAM_TABLE = "program_state";
 const ADMIN_TABLE = "admin_users";
 const PROGRAM_ROW_ID = "main";
 const SUPABASE_AUTH_SCOPE = {
-  persistSession: false,
-  autoRefreshToken: false,
+  persistSession: true,
+  autoRefreshToken: true,
   detectSessionInUrl: false,
 };
 
@@ -71,6 +71,8 @@ let state = getActiveTournamentState(program);
 let currentSchedule = new Map();
 let validationReport = null;
 let adminSession = null;
+let authBusy = false;
+let authNotice = null;
 let remoteReady = false;
 let remoteRevision = 0;
 let remoteSubscription = null;
@@ -81,6 +83,7 @@ const elements = {
   setupPanel: document.querySelector(".setup-panel"),
   appShell: document.querySelector(".app-shell"),
   authPanel: document.querySelector("#authPanel"),
+  authForm: document.querySelector("#authForm"),
   authStatus: document.querySelector("#authStatus"),
   authEmail: document.querySelector("#authEmail"),
   authPassword: document.querySelector("#authPassword"),
@@ -203,17 +206,35 @@ function isEditingEnabled() {
   return APP_MODE !== "participant" && Boolean(adminSession) && !state.locked;
 }
 
+function setAuthStatus(message) {
+  authNotice = message;
+  updateAuthUi();
+}
+
+function setAuthBusy(nextBusy) {
+  authBusy = Boolean(nextBusy);
+  updateAuthUi();
+}
+
 function updateAuthUi() {
   const email = adminSession?.user?.email || "";
   if (elements.authStatus) {
-    elements.authStatus.textContent = adminSession
+    elements.authStatus.textContent = authBusy
+      ? "Aanmelden..."
+      : adminSession
       ? `Ingelogd als ${email || "admin"}`
-      : "Niet ingelogd";
+      : authNotice || "Niet ingelogd";
   }
-  if (elements.authSignIn) elements.authSignIn.hidden = Boolean(adminSession);
-  if (elements.authSignOut) elements.authSignOut.hidden = !adminSession;
-  if (elements.authEmail) elements.authEmail.disabled = Boolean(adminSession);
-  if (elements.authPassword) elements.authPassword.disabled = Boolean(adminSession);
+  if (elements.authSignIn) {
+    elements.authSignIn.hidden = Boolean(adminSession);
+    elements.authSignIn.disabled = authBusy;
+  }
+  if (elements.authSignOut) {
+    elements.authSignOut.hidden = !adminSession;
+    elements.authSignOut.disabled = authBusy || !adminSession;
+  }
+  if (elements.authEmail) elements.authEmail.disabled = Boolean(adminSession) || authBusy;
+  if (elements.authPassword) elements.authPassword.disabled = Boolean(adminSession) || authBusy;
   updateWriteGate();
 }
 
@@ -348,29 +369,44 @@ async function verifyAdminSession(session) {
       },
     });
 
-    if (!response.ok) return false;
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(text || `Beheercontrole mislukt (${response.status}).`);
+    }
     const result = await response.json();
-    return Boolean(result?.isAdmin);
-  } catch {
-    return false;
+    return {
+      isAdmin: Boolean(result?.isAdmin),
+      user: result?.user || null,
+    };
+  } catch (error) {
+    throw new Error(error?.message || "Beheercontrole mislukt.");
   }
 }
 
 async function syncAuthSession() {
-  const { data } = await supabase.auth.getSession();
-  const session = data?.session || null;
-  if (!session) {
-    adminSession = null;
-    updateAuthUi();
-    return;
-  }
+  try {
+    const { data } = await supabase.auth.getSession();
+    const session = data?.session || null;
+    if (!session) {
+      adminSession = null;
+      updateAuthUi();
+      return;
+    }
 
-  const isAdmin = await verifyAdminSession(session);
-  adminSession = isAdmin ? session : null;
-  if (!isAdmin) {
-    showStatus("Deze account heeft geen beheerrechten.");
+    const access = await verifyAdminSession(session);
+    adminSession = access.isAdmin ? session : null;
+    if (!access.isAdmin) {
+      authNotice = "Geen beheerrechten";
+      showStatus("Deze account heeft geen beheerrechten.");
+    }
+    if (access.isAdmin) authNotice = null;
+    updateAuthUi();
+  } catch (error) {
+    adminSession = null;
+    authNotice = "Kan rechten niet controleren";
+    showStatus(`Beheerrechten controleren mislukt. ${error?.message || ""}`.trim());
+    updateAuthUi();
   }
-  updateAuthUi();
 }
 
 async function bootstrapRemoteState() {
@@ -3914,33 +3950,59 @@ if (elements.deleteTournamentButton) {
   elements.deleteTournamentButton.addEventListener("click", deleteTournament);
 }
 
-if (elements.authSignIn) {
-  elements.authSignIn.addEventListener("click", async () => {
-    const email = elements.authEmail?.value.trim();
-    const password = elements.authPassword?.value || "";
-    if (!email || !password) {
-      showStatus("Vul je admin e-mail en wachtwoord in.");
-      return;
-    }
+async function handleAdminLogin(event) {
+  event?.preventDefault?.();
+  if (authBusy) return;
+
+  const email = elements.authEmail?.value.trim();
+  const password = elements.authPassword?.value || "";
+  if (!email || !password) {
+    setAuthStatus("Vul e-mail en wachtwoord in");
+    showStatus("Vul je admin e-mail en wachtwoord in.");
+    return;
+  }
+
+  try {
+    setAuthBusy(true);
+    authNotice = null;
+    showStatus("Inloggen bij Supabase...");
 
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error || !data?.session) {
-      showStatus(error?.message || "Inloggen is niet gelukt.");
-      return;
+      throw new Error(error?.message || "Inloggen is niet gelukt.");
     }
 
-    const isAdmin = await verifyAdminSession(data.session);
-    if (!isAdmin) {
+    authNotice = "Beheerrechten controleren...";
+    updateAuthUi();
+    const access = await verifyAdminSession(data.session);
+    if (!access.isAdmin) {
       await supabase.auth.signOut();
+      adminSession = null;
+      authNotice = "Geen beheerrechten";
       showStatus("Deze account heeft geen beheerrechten.");
       return;
     }
 
     adminSession = data.session;
+    authNotice = null;
     updateAuthUi();
     void refreshRemoteProgram();
     showStatus("Beheerder ingelogd.");
-  });
+  } catch (error) {
+    adminSession = null;
+    authNotice = error?.message ? `Inloggen mislukt. ${error.message}` : "Inloggen mislukt";
+    showStatus(`Inloggen mislukt. ${error?.message || "Controleer je verbinding."}`);
+  } finally {
+    setAuthBusy(false);
+  }
+}
+
+if (elements.authForm) {
+  elements.authForm.addEventListener("submit", handleAdminLogin);
+}
+
+if (elements.authSignIn && !elements.authForm) {
+  elements.authSignIn.addEventListener("click", handleAdminLogin);
 }
 
 if (elements.authSignOut) {
@@ -3948,6 +4010,7 @@ if (elements.authSignOut) {
     window.clearTimeout(saveTimer);
     await supabase.auth.signOut();
     adminSession = null;
+    authNotice = "Uitgelogd";
     updateAuthUi();
     void refreshRemoteProgram();
     showStatus("Uitgelogd.");
@@ -3970,6 +4033,15 @@ window.addEventListener("online", () => {
 
 window.addEventListener("focus", () => {
   void refreshRemoteProgram();
+});
+
+window.addEventListener("error", (event) => {
+  if (!event?.error) return;
+  console.error(event.error);
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  console.error(event.reason);
 });
 
 document.addEventListener("input", (event) => {
