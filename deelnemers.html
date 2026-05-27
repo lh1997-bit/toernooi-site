@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="nl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Toernooimaker - Deelnemers</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">Toernooi</p>
+        <h1>Toernooimaker</h1>
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <aside class="setup-panel" aria-label="Toernooi instellingen">
+        <section class="panel">
+          <div class="panel-heading">
+            <h2>Instellingen</h2>
+          </div>
+
+          <label class="field">
+            <span>Naam</span>
+            <input id="tournamentName" type="text" autocomplete="off" />
+          </label>
+
+          <div class="field">
+            <span>Format</span>
+            <div class="segmented" role="tablist" aria-label="Format">
+              <button id="formatGroups" type="button" data-format="groups">Poules</button>
+              <button id="formatLeague" type="button" data-format="league">Leaguefase</button>
+            </div>
+          </div>
+
+          <label class="field">
+            <span>Aantal teams</span>
+            <input id="teamCount" type="number" min="2" max="64" step="1" />
+          </label>
+
+          <div class="schedule-options">
+            <label class="field">
+              <span>Starttijd</span>
+              <input id="startTime" type="time" />
+            </label>
+            <label class="field">
+              <span>Eindtijd</span>
+              <input id="endTime" type="time" />
+            </label>
+            <label class="field">
+              <span>Wedstrijdduur</span>
+              <input id="matchDuration" type="number" min="1" max="240" step="1" />
+            </label>
+            <label class="field">
+              <span>Wisseltijd</span>
+              <input id="breakDuration" type="number" min="0" max="120" step="1" />
+            </label>
+            <label class="field">
+              <span>Velden</span>
+              <input id="fieldCount" type="number" min="1" max="32" step="1" />
+            </label>
+          </div>
+
+          <label class="check-field knockout-option">
+            <input id="doubleKnockoutEnabled" type="checkbox" />
+            <span>Winnaars- en verliezersknock-out</span>
+          </label>
+
+          <div id="groupOptions" class="option-grid">
+            <label class="field">
+              <span>Aantal poules</span>
+              <input id="groupCount" type="number" min="1" max="32" step="1" />
+            </label>
+            <label class="field">
+              <span>Door per poule</span>
+              <input id="advancePerGroup" type="number" min="1" max="8" step="1" />
+            </label>
+            <label class="check-field">
+              <input id="doubleRound" type="checkbox" />
+              <span>Heen en terug</span>
+            </label>
+          </div>
+
+          <div id="leagueOptions" class="option-grid">
+            <label class="check-field">
+              <input id="playoffEnabled" type="checkbox" />
+              <span>Tussenronde aan</span>
+            </label>
+            <label class="field">
+              <span>Wedstrijden per team</span>
+              <input id="leagueMatches" type="number" min="1" max="63" step="1" />
+            </label>
+            <label class="field">
+              <span>Direct naar knock-out</span>
+              <input id="directQualifiers" type="number" min="1" max="32" step="1" />
+            </label>
+            <label class="field">
+              <span>Teams in tussenronde</span>
+              <input id="playoffQualifiers" type="number" min="0" max="32" step="2" />
+            </label>
+            <button class="secondary-button league-random-button" id="randomizeLeagueButton" type="button">Willekeurige uitslagen invullen</button>
+          </div>
+
+          <div class="button-row">
+            <button class="secondary-button" id="shuffleTeams" type="button">Hussel teams</button>
+            <button class="secondary-button" id="planButton" type="button">Bereken planning</button>
+            <button class="primary-button" id="generateButton" type="button">Genereer toernooi</button>
+          </div>
+
+          <div id="planningResult" class="planning-result" hidden></div>
+        </section>
+
+        <section class="panel team-panel">
+          <div class="panel-heading">
+            <h2>Teams</h2>
+          </div>
+          <div id="teamFields" class="team-fields"></div>
+        </section>
+      </aside>
+
+      <section class="workspace" aria-live="polite">
+        <div class="workspace-bar">
+          <div>
+            <p class="eyebrow" id="workspaceFormat">Geen schema</p>
+            <h2 id="workspaceTitle">Maak je toernooi</h2>
+          </div>
+          <nav class="view-tabs" id="viewTabs" aria-label="Toernooi onderdelen"></nav>
+        </div>
+        <div id="statusMessage" class="status-message" hidden></div>
+        <div id="tournamentContent" class="tournament-content"></div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
