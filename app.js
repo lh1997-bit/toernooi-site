@@ -248,6 +248,51 @@ function normalizeProgramState(loaded) {
   };
 }
 
+function linkMatchCollections(rounds, matches) {
+  const byId = new Map();
+
+  const register = (match) => {
+    if (!match || !match.id) return null;
+    const existing = byId.get(match.id);
+    if (existing) {
+      Object.assign(existing, match);
+      return existing;
+    }
+    byId.set(match.id, match);
+    return match;
+  };
+
+  const safeRounds = Array.isArray(rounds) ? rounds : [];
+  const safeMatches = Array.isArray(matches) ? matches : [];
+
+  const linkedRounds = safeRounds.map((round) => (Array.isArray(round) ? round.map(register).filter(Boolean) : []));
+  safeMatches.forEach(register);
+
+  const linkedMatches = [];
+  linkedRounds.forEach((round) => {
+    round.forEach((match) => {
+      if (!linkedMatches.includes(match)) linkedMatches.push(match);
+    });
+  });
+  safeMatches.forEach((match) => {
+    const ref = match?.id ? byId.get(match.id) : null;
+    if (ref && !linkedMatches.includes(ref)) linkedMatches.push(ref);
+  });
+
+  return { rounds: linkedRounds, matches: linkedMatches };
+}
+
+function normalizeGroupState(group) {
+  const safeGroup = group || {};
+  const linked = linkMatchCollections(safeGroup.rounds, safeGroup.matches);
+  return {
+    ...safeGroup,
+    teamIds: Array.isArray(safeGroup.teamIds) ? safeGroup.teamIds.filter(Boolean) : [],
+    rounds: linked.rounds,
+    matches: linked.matches,
+  };
+}
+
 function normalizeTournamentState(loaded, idFallback) {
   const fresh = defaultState();
   const teams = Array.isArray(loaded?.teams) && loaded.teams.length
@@ -259,9 +304,8 @@ function normalizeTournamentState(loaded, idFallback) {
   const teamIds = Array.isArray(loaded?.teamIds) && loaded.teamIds.length
     ? loaded.teamIds.filter(Boolean)
     : teams.map((team) => team.id);
-  const groups = Array.isArray(loaded?.groups) ? loaded.groups : [];
-  const rounds = Array.isArray(loaded?.rounds) ? loaded.rounds : [];
-  const matches = Array.isArray(loaded?.matches) ? loaded.matches : [];
+  const groups = Array.isArray(loaded?.groups) ? loaded.groups.map(normalizeGroupState) : [];
+  const linkedMatches = linkMatchCollections(loaded?.rounds, loaded?.matches);
   return {
     ...fresh,
     ...loaded,
@@ -270,8 +314,8 @@ function normalizeTournamentState(loaded, idFallback) {
     teams,
     teamIds,
     groups,
-    rounds,
-    matches,
+    rounds: linkedMatches.rounds,
+    matches: linkedMatches.matches,
     playoff: loaded?.playoff || null,
     knockout: loaded?.knockout || null,
     activeView: loaded.activeView || fresh.activeView,
@@ -317,10 +361,15 @@ function updateWriteGate() {
     ".header-actions button, .header-actions select, .setup-panel input, .setup-panel select, .setup-panel textarea, .setup-panel button, .tournament-content input, .tournament-content select, .tournament-content textarea, .tournament-content button",
   );
   const alwaysEnabledIds = new Set(["lockButton", "programButton", "tournamentPicker"]);
+  const alwaysEditableSelectors = [".score-input", ".winner-select", ".tie-start-input", ".double-knockout-tab"];
 
   protectedControls.forEach((control) => {
     if (control.closest(".view-tabs")) return;
     if (alwaysEnabledIds.has(control.id)) {
+      control.disabled = false;
+      return;
+    }
+    if (alwaysEditableSelectors.some((selector) => control.matches(selector))) {
       control.disabled = false;
       return;
     }
@@ -1794,18 +1843,19 @@ function renderLeagueKnockout(tournament) {
   const sections = [];
   const preview = getLeagueKnockoutPreview(tournament);
   const playoffEnabled = leaguePlayoffActive(tournament);
-  const viewOnly = state.locked;
+  const viewOnly = APP_MODE === "participant";
+  const canManageStructure = APP_MODE !== "participant" && !state.locked;
 
   if (playoffEnabled) {
     sections.push(`
       <section>
         <div class="section-head">
           <h3>Tussenronde</h3>
-          ${viewOnly ? "" : `<div class="section-actions"><button class="secondary-button" data-action="check-league-progress" type="button">Check wie er door is</button></div>`}
+          ${canManageStructure ? `<div class="section-actions"><button class="secondary-button" data-action="check-league-progress" type="button">Check wie er door is</button></div>` : ""}
         </div>
         ${
           tournament.playoff
-            ? renderBracket(tournament.playoff, { preview: viewOnly })
+            ? renderBracket(tournament.playoff, viewOnly ? { preview: true } : {})
             : renderBracketPreview(preview.playoff, !viewOnly)
         }
       </section>
@@ -1813,18 +1863,18 @@ function renderLeagueKnockout(tournament) {
   }
 
   sections.push(`
-    <section>
-      <div class="section-head">
-        <h3>Eindfase</h3>
-        ${viewOnly ? "" : `<div class="section-actions"><button class="primary-button" data-action="generate-league-finals" type="button">Genereer eindfase</button></div>`}
-      </div>
-      ${
-        tournament.knockout
-          ? renderKnockoutDisplay(tournament.knockout, "Eindfase", "generate-league-finals", viewOnly)
-          : renderKnockoutDisplay(preview.knockout, "Eindfase", "generate-league-finals", true)
-      }
-    </section>
-  `);
+      <section>
+        <div class="section-head">
+          <h3>Eindfase</h3>
+          ${canManageStructure ? `<div class="section-actions"><button class="primary-button" data-action="generate-league-finals" type="button">Genereer eindfase</button></div>` : ""}
+        </div>
+        ${
+          tournament.knockout
+            ? renderKnockoutDisplay(tournament.knockout, "Eindfase", "generate-league-finals", viewOnly)
+            : renderKnockoutDisplay(preview.knockout, "Eindfase", "generate-league-finals", true)
+        }
+      </section>
+    `);
 
   return `<div class="stack">${sections.join("")}</div>`;
 }
@@ -1883,18 +1933,13 @@ function renderDoubleKnockout(container, title, action, preview = false) {
 }
 
 function renderBracketBlock(bracket, title, action, preview = false) {
-  const viewOnly = preview || state.locked || APP_MODE === "participant";
+  const viewOnly = preview || APP_MODE === "participant";
+  const showAction = !preview && APP_MODE !== "participant" && !state.locked;
   return `
     <section>
       <div class="section-head">
         <h3>${escapeHtml(title)}</h3>
-        ${
-          viewOnly
-            ? ""
-            : `<div class="section-actions">
-                <button class="secondary-button" data-action="${action}" type="button">Opnieuw genereren</button>
-              </div>`
-        }
+        ${showAction ? `<div class="section-actions"><button class="secondary-button" data-action="${action}" type="button">Opnieuw genereren</button></div>` : ""}
       </div>
       ${viewOnly ? renderBracketPreview(bracket, false) : renderBracket(bracket)}
     </section>
@@ -2321,14 +2366,14 @@ function getResultMeta(scoreComplete, teamScore, opponentScore) {
 }
 
 function renderBracketSection(bracket, title, action, preview = false) {
+  const viewOnly = preview || APP_MODE === "participant";
+  const showAction = !preview && APP_MODE !== "participant" && !state.locked;
   return `
     <div class="section-head">
       <h3>${title}</h3>
-      <div class="section-actions">
-        <button class="secondary-button" data-action="${action}" type="button">Opnieuw genereren</button>
-      </div>
+      ${showAction ? `<div class="section-actions"><button class="secondary-button" data-action="${action}" type="button">Opnieuw genereren</button></div>` : ""}
     </div>
-    ${preview ? renderBracketPreview(bracket) : renderBracket(bracket)}
+    ${viewOnly ? renderBracketPreview(bracket) : renderBracket(bracket)}
   `;
 }
 
@@ -3825,10 +3870,19 @@ function findMatch(matchId) {
   if (!tournament) return null;
 
   if (tournament.format === "groups") {
-    return tournament.groups.flatMap((group) => group.matches).find((match) => match.id === matchId) || null;
+    return (Array.isArray(tournament.groups) ? tournament.groups : [])
+      .flatMap((group) => [
+        ...(Array.isArray(group.matches) ? group.matches : []),
+        ...(Array.isArray(group.rounds) ? group.rounds.flat() : []),
+      ])
+      .find((match) => match?.id === matchId) || null;
   }
 
-  return tournament.matches.find((match) => match.id === matchId) || null;
+  return (
+    (Array.isArray(tournament.matches) ? tournament.matches : []).find((match) => match?.id === matchId) ||
+    (Array.isArray(tournament.rounds) ? tournament.rounds.flat() : []).find((match) => match?.id === matchId) ||
+    null
+  );
 }
 
 function findTie(tieId) {

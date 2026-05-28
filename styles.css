@@ -55,6 +55,13 @@ body.admin-readonly .tournament-content button {
   cursor: not-allowed;
 }
 
+body.admin-readonly .tournament-content .score-input,
+body.admin-readonly .tournament-content .winner-select,
+body.admin-readonly .tournament-content .tie-start-input,
+body.admin-readonly .tournament-content .double-knockout-tab {
+  cursor: auto;
+}
+
 body.admin-readonly .header-actions button:disabled,
 body.admin-readonly .setup-panel input:disabled,
 body.admin-readonly .setup-panel select:disabled,
