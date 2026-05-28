@@ -1282,6 +1282,7 @@ function renderSetup() {
   }
   if (elements.programButton) {
     elements.programButton.hidden = false;
+    elements.programButton.textContent = state.activeView === "program" ? "Terug naar toernooi" : "Programma";
   }
 
   document.querySelectorAll("[data-format]").forEach((button) => {
@@ -1650,6 +1651,9 @@ function renderProgramView() {
 
   return `
     <div class="program-overview">
+      <div class="program-return-row">
+        <button class="secondary-button" data-action="return-to-tournament" type="button">Terug naar toernooi</button>
+      </div>
       <div class="admin-overview">
         <div class="admin-overview-grid">
           <article class="overview-card">
@@ -4115,6 +4119,11 @@ document.addEventListener("click", (event) => {
     if (action === "generate-group-knockout") generateGroupKnockout();
     if (action === "check-league-progress") checkLeagueProgress();
     if (action === "generate-league-finals") generateLeagueFinals();
+    if (action === "return-to-tournament") {
+      state.activeView = state.settings.format === "groups" ? "matches" : "league";
+      renderAll();
+      return;
+    }
     if (action === "switch-tournament") setActiveTournament(actionButton.dataset.tournamentId);
     if (action === "toggle-lock") toggleTournamentLock();
     if (action === "switch-double-knockout-view") {
@@ -4299,7 +4308,7 @@ if (elements.validateButton) {
 }
 if (elements.programButton) {
   elements.programButton.addEventListener("click", () => {
-    state.activeView = "program";
+    state.activeView = state.activeView === "program" ? (state.settings.format === "groups" ? "matches" : "league") : "program";
     renderAll();
   });
 }

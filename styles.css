@@ -509,6 +509,11 @@ button {
   gap: 16px;
 }
 
+.program-return-row {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .program-layout {
   display: grid;
   grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
