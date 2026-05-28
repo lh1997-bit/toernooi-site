@@ -469,6 +469,12 @@ async function bootstrapRemoteState() {
     applyRemoteProgram(loaded.program, loaded.revision);
     remoteReady = true;
     subscribeToRemoteProgram();
+    window.setTimeout(() => {
+      void refreshRemoteProgram();
+    }, 250);
+    window.setTimeout(() => {
+      void refreshRemoteProgram();
+    }, 1000);
     return;
   }
 
@@ -1259,6 +1265,22 @@ function renderTournament() {
   }
 
   if (APP_MODE === "participant") {
+    if (!remoteReady) {
+      state.activeView = "team";
+      renderTabs();
+      elements.workspaceTitle.textContent = "Toernooi laden";
+      elements.workspaceFormat.textContent = "Even wachten op het schema";
+      elements.tournamentContent.innerHTML = `
+        <div class="empty-state">
+          <div>
+            <h3>Bezig met laden</h3>
+            <p>Het schema en de standen worden opgehaald. Dat kan een ogenblik duren.</p>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
     state.activeView = "team";
     renderTabs();
 
