@@ -298,9 +298,14 @@ function updateWriteGate() {
   const protectedControls = document.querySelectorAll(
     ".header-actions button, .header-actions select, .setup-panel input, .setup-panel select, .setup-panel textarea, .setup-panel button, .tournament-content input, .tournament-content select, .tournament-content textarea, .tournament-content button",
   );
+  const alwaysEnabledIds = new Set(["lockButton", "programButton", "tournamentPicker"]);
 
   protectedControls.forEach((control) => {
     if (control.closest(".view-tabs")) return;
+    if (alwaysEnabledIds.has(control.id)) {
+      control.disabled = false;
+      return;
+    }
     control.disabled = !canEdit;
   });
 }
