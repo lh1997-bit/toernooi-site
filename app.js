@@ -1420,9 +1420,12 @@ function renderProgramTournamentCard(tournament, index) {
         <span>${totalMatches} wedstrijden</span>
         <span>Veld ${fieldStart}-${fieldEnd}</span>
       </div>
-      <button class="secondary-button" data-action="switch-tournament" data-tournament-id="${escapeHtml(tournament.id)}" type="button">
-        Openen
-      </button>
+      <div class="button-row program-tournament-actions">
+        <button class="secondary-button" data-action="switch-tournament" data-tournament-id="${escapeHtml(tournament.id)}" type="button">
+          Openen
+        </button>
+        <a class="secondary-button" href="${escapeHtml(publicPath)}" target="_blank" rel="noreferrer">Open deelnemers</a>
+      </div>
     </article>
   `;
 }
@@ -1552,7 +1555,9 @@ function renderParticipantDirectory() {
             <span>${totalMatches} wedstrijden</span>
             <span>Veld ${fieldStart}-${fieldEnd}</span>
           </div>
-          <a class="secondary-button" href="${escapeHtml(publicPath)}">Openen</a>
+          <div class="button-row program-tournament-actions">
+            <a class="secondary-button" href="${escapeHtml(publicPath)}" target="_blank" rel="noreferrer">Open deelnemers</a>
+          </div>
         </article>
       `;
     })
