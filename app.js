@@ -88,6 +88,7 @@ function defaultProgramState() {
     updatedAt: 0,
     nextTournamentId: 2,
     activeTournamentId: "tournament-1",
+    programDateFilter: "",
     tournaments: [defaultState()],
   };
 }
@@ -267,6 +268,7 @@ function normalizeProgramState(loaded) {
     ...fresh,
     ...loaded,
     activeTournamentId,
+    programDateFilter: validDate(loaded.programDateFilter) ? loaded.programDateFilter : fresh.programDateFilter,
     nextTournamentId: Math.max(fresh.nextTournamentId, Number(loaded.nextTournamentId) || 0, tournaments.length + 1),
     tournaments,
   };
@@ -1651,64 +1653,118 @@ function summarizeProgramFields() {
     .join(" / ");
 }
 
-function renderProgramView() {
-  const programRows = collectProgramScheduleRows();
-  const programDays = new Set(program.tournaments.map((tournament) => tournament.settings?.date).filter(Boolean)).size;
-  const cards = program.tournaments
-    .map((tournament, index) => renderProgramTournamentCard(tournament, index))
-    .join("");
+function getProgramDateOptions() {
+  return [...new Set(program.tournaments.map((tournament) => tournament.settings?.date).filter(validDate))].sort();
+}
 
-  return `
-    <div class="program-overview">
-      <div class="program-return-row">
-        <button class="secondary-button" data-action="return-to-tournament" type="button">Terug naar toernooi</button>
-      </div>
-      <div class="admin-overview">
-        <div class="admin-overview-grid">
-          <article class="overview-card">
-            <span>Toernooien</span>
-            <strong>${program.tournaments.length}</strong>
-            <small>Losse opzet per evenement</small>
-          </article>
-          <article class="overview-card">
-            <span>Dagen</span>
-            <strong>${program.tournaments.length ? programDays || 1 : 0}</strong>
-            <small>Programma per datum gegroepeerd</small>
-          </article>
-          <article class="overview-card">
-            <span>Geplande wedstrijden</span>
-            <strong>${programRows.length}</strong>
-            <small>Alles gecombineerd in tijdsvolgorde</small>
-          </article>
-          <article class="overview-card">
-            <span>Actief toernooi</span>
-            <strong>${escapeHtml(state.settings.name)}</strong>
-            <small>${escapeHtml(state.settings.format === "groups" ? "Poules" : "Leaguefase")}</small>
-          </article>
-          <article class="overview-card">
-            <span>Status</span>
-            <strong>${state.locked ? "Vastgezet" : "Bewerkbaar"}</strong>
-            <small>Teamnamen en instellingen ${state.locked ? "staan op slot" : "kunnen nog aangepast worden"}</small>
-          </article>
+function renderProgramScheduleFiltered(rows, selectedDate = "") {
+  const visibleRows = selectedDate ? rows.filter((row) => row.date === selectedDate) : rows;
+
+  if (!visibleRows.length) {
+    return `
+      <div class="empty-state compact">
+        <div>
+          <h3>Geen schema in programma</h3>
+          <p>${selectedDate ? "Er staat op deze datum nog geen schema klaar." : "Maak eerst een of meer toernooien aan en genereer daar de schema's."}</p>
         </div>
       </div>
-      <div class="program-layout">
-        <section class="stage-card program-card-list">
-          <div class="section-head">
-            <h3>Toernooien</h3>
-            <div class="section-actions">
-              <button class="secondary-button" data-action="toggle-lock" type="button">${state.locked ? "Bewerk toernooi" : "Toernooi vastzetten"}</button>
-            </div>
-          </div>
-          <div class="program-tournament-list">${cards}</div>
-        </section>
-        <section class="stage-card program-schedule">
-          <div class="section-head">
-            <h3>Gecombineerd schema</h3>
-          </div>
-          ${renderProgramSchedule(programRows)}
-        </section>
+    `;
+  }
+
+  const groups = [];
+  visibleRows.forEach((row) => {
+    const key = row.date || "";
+    const group = groups.find((item) => item.key === key);
+    if (group) {
+      group.rows.push(row);
+    } else {
+      groups.push({ key, rows: [row] });
+    }
+  });
+
+  groups.sort((a, b) => {
+    if (!a.key && !b.key) return 0;
+    if (!a.key) return 1;
+    if (!b.key) return -1;
+    return a.key.localeCompare(b.key);
+  });
+
+  return `
+    <div class="program-day-list">
+      ${groups
+        .map((group, dayIndex) => {
+          const dayRows = group.rows.sort(
+            (a, b) =>
+              a.schedule.start - b.schedule.start ||
+              a.schedule.displayField - b.schedule.displayField ||
+              a.tournamentName.localeCompare(b.tournamentName, "nl"),
+          );
+          const title = formatProgramDateLabel(group.key);
+          const tournamentsCount = new Set(dayRows.map((row) => row.tournamentId)).size;
+          return `
+            <section class="program-day-card">
+              <div class="section-head program-day-head">
+                <div>
+                  <span class="eyebrow">Dag ${dayIndex + 1}</span>
+                  <h3>${escapeHtml(title)}</h3>
+                </div>
+                <div class="section-actions">
+                  <span class="stage-meta">${dayRows.length} wedstrijden - ${tournamentsCount} toernooi${tournamentsCount === 1 ? "" : "en"}</span>
+                </div>
+              </div>
+              <div class="program-schedule-list">
+                ${dayRows
+                  .map(
+                    (row) => `
+                      <article class="program-schedule-row">
+                        <div class="program-schedule-time">${escapeHtml(formatScheduleWindow(row.schedule))}</div>
+                        <div class="program-schedule-field">Veld ${row.schedule.displayField || row.schedule.field}</div>
+                        <div class="program-schedule-title">${escapeHtml(row.tournamentName)}</div>
+                        <div class="program-schedule-detail">${escapeHtml(row.detail)}</div>
+                      </article>
+                    `,
+                  )
+                  .join("")}
+              </div>
+            </section>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderProgramView() {
+  const programRows = collectProgramScheduleRows();
+  const availableDates = getProgramDateOptions();
+  const selectedDate = validDate(program.programDateFilter) ? program.programDateFilter : "";
+  const dateOptionsMarkup = [
+    `<option value="">Alle dagen</option>`,
+    ...availableDates.map(
+      (date) => `<option value="${escapeHtml(date)}"${selectedDate === date ? " selected" : ""}>${escapeHtml(formatProgramDateLabel(date))}</option>`,
+    ),
+  ].join("");
+
+  return `
+    <div class="program-page">
+      <div class="program-page-toolbar">
+        <button class="secondary-button" data-action="return-to-tournament" type="button">Terug naar toernooi</button>
+        <label class="program-date-filter">
+          <span>Datum</span>
+          <select id="programDateFilter" ${availableDates.length ? "" : "disabled"}>
+            ${dateOptionsMarkup}
+          </select>
+        </label>
       </div>
+      <section class="stage-card program-schedule program-schedule-only">
+        <div class="section-head">
+          <h3>Gecombineerd schema</h3>
+          <div class="section-actions">
+            <span class="stage-meta">${selectedDate ? formatProgramDateLabel(selectedDate) : `${programRows.length} wedstrijden`}</span>
+          </div>
+        </div>
+        ${renderProgramScheduleFiltered(programRows, selectedDate)}
+      </section>
     </div>
   `;
 }
@@ -4143,6 +4199,14 @@ document.addEventListener("click", (event) => {
       persist();
       renderAll();
     }
+  }
+});
+
+document.addEventListener("change", (event) => {
+  if (event.target?.id === "programDateFilter") {
+    state.programDateFilter = validDate(event.target.value) ? event.target.value : "";
+    persist();
+    renderAll();
   }
 });
 
