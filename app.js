@@ -568,6 +568,15 @@ function getActiveTournamentState(programState = program) {
   return programState.tournaments.find((tournament) => tournament.id === tournamentId) || programState.tournaments[0] || defaultState();
 }
 
+function getDefaultTournamentView() {
+  return state.settings.format === "groups" ? "matches" : "league";
+}
+
+function leaveProgramView() {
+  if (APP_MODE !== "admin" || state.activeView !== "program") return;
+  state.activeView = getDefaultTournamentView();
+}
+
 function syncActiveTournamentToProgram() {
   const index = program.tournaments.findIndex((tournament) => tournament.id === state.id);
   if (index === -1) {
@@ -1282,7 +1291,7 @@ function renderSetup() {
   }
   if (elements.programButton) {
     elements.programButton.hidden = false;
-    elements.programButton.textContent = state.activeView === "program" ? "Terug naar toernooi" : "Programma";
+    elements.programButton.textContent = "Programma";
   }
 
   document.querySelectorAll("[data-format]").forEach((button) => {
@@ -4011,6 +4020,9 @@ function showStatus(message) {
 
 function renderAll() {
   const programFocus = APP_MODE === "admin" && state.activeView === "program";
+  if (elements.programButton) {
+    elements.programButton.textContent = "Programma";
+  }
   renderSetup();
   renderTournament();
   updateAuthUi();
@@ -4134,8 +4146,19 @@ document.addEventListener("click", (event) => {
   }
 });
 
+if (elements.setupPanel) {
+  const escapeProgramView = (event) => {
+    if (APP_MODE !== "admin" || state.activeView !== "program") return;
+    if (!event.target.closest("input, select, textarea")) return;
+    leaveProgramView();
+  };
+  elements.setupPanel.addEventListener("input", escapeProgramView, true);
+  elements.setupPanel.addEventListener("change", escapeProgramView, true);
+}
+
 if (elements.tournamentName) {
   elements.tournamentName.addEventListener("input", (event) => {
+    leaveProgramView();
     state.settings.name = event.target.value;
     syncTournamentSlugFromName();
     persist();
@@ -4308,7 +4331,7 @@ if (elements.validateButton) {
 }
 if (elements.programButton) {
   elements.programButton.addEventListener("click", () => {
-    state.activeView = state.activeView === "program" ? (state.settings.format === "groups" ? "matches" : "league") : "program";
+    state.activeView = "program";
     renderAll();
   });
 }
