@@ -78,6 +78,36 @@ body.knockout-focus .setup-panel {
   display: none;
 }
 
+body.program-focus .setup-panel {
+  display: none;
+}
+
+body.program-focus .app-shell {
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+body.program-focus .workspace {
+  grid-column: 1 / -1;
+  overflow: visible;
+}
+
+body.program-focus .workspace {
+  border-radius: 0;
+  box-shadow: none;
+  border-left: 0;
+  border-right: 0;
+}
+
+body.program-focus .tournament-content {
+  overflow: visible;
+  padding: 12px 16px 28px;
+}
+
 body.knockout-focus .app-shell {
   grid-template-columns: minmax(0, 1fr);
   width: 100%;
@@ -175,6 +205,56 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.toolbar-group {
+  position: relative;
+}
+
+.toolbar-group > summary {
+  list-style: none;
+}
+
+.toolbar-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.toolbar-group > summary.ghost-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-group > summary.ghost-button::after {
+  content: "▾";
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
+.toolbar-group[open] > summary.ghost-button::after {
+  content: "▴";
+}
+
+.toolbar-group-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 30;
+  display: grid;
+  gap: 8px;
+  min-width: 220px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.toolbar-group-panel .ghost-button,
+.toolbar-group-panel .secondary-button,
+.toolbar-group-panel .danger-button {
+  width: 100%;
+  justify-content: center;
 }
 
 .auth-panel .panel-heading {
@@ -504,6 +584,28 @@ button {
 .program-schedule-detail {
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.program-day-list {
+  display: grid;
+  gap: 14px;
+}
+
+.program-day-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.program-day-card .program-schedule-list {
+  gap: 8px;
+}
+
+.program-day-head {
+  margin-bottom: 0;
 }
 
 .planning-result {
@@ -1567,6 +1669,24 @@ button {
   .workspace-bar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .header-actions {
+    width: 100%;
+  }
+
+  .toolbar-group {
+    width: 100%;
+  }
+
+  .toolbar-group > summary.ghost-button {
+    width: 100%;
+  }
+
+  .toolbar-group-panel {
+    position: static;
+    min-width: 0;
+    width: 100%;
   }
 
   .app-shell {

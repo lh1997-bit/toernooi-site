@@ -13,17 +13,27 @@
         <h1>Toernooimaker</h1>
       </div>
       <div class="header-actions">
-        <button class="ghost-button" id="importButton" type="button">Import</button>
-        <input id="importFile" type="file" accept="application/json" hidden />
-        <button class="ghost-button" id="exportButton" type="button">Export</button>
         <button class="ghost-button" id="programButton" type="button">Programma</button>
         <select id="tournamentPicker" class="ghost-select" aria-label="Toernooi kiezen"></select>
-        <button class="secondary-button" id="addTournamentButton" type="button">Toernooi toevoegen</button>
-        <button class="secondary-button" id="duplicateTournamentButton" type="button">Kopieer</button>
-        <button class="secondary-button" id="deleteTournamentButton" type="button">Verwijder</button>
-        <button class="secondary-button" id="lockButton" type="button">Toernooi vastzetten</button>
-        <a class="ghost-button" href="/">Deelnemers</a>
-        <button class="danger-button" id="newButton" type="button">Reset</button>
+        <details class="toolbar-group">
+          <summary class="ghost-button">Bestand</summary>
+          <div class="toolbar-group-panel">
+            <button class="ghost-button" id="importButton" type="button">Import</button>
+            <input id="importFile" type="file" accept="application/json" hidden />
+            <button class="ghost-button" id="exportButton" type="button">Export</button>
+            <button class="danger-button" id="newButton" type="button">Reset</button>
+          </div>
+        </details>
+        <details class="toolbar-group">
+          <summary class="ghost-button">Toernooi</summary>
+          <div class="toolbar-group-panel">
+            <button class="secondary-button" id="addTournamentButton" type="button">Toernooi toevoegen</button>
+            <button class="secondary-button" id="duplicateTournamentButton" type="button">Kopieer</button>
+            <button class="secondary-button" id="deleteTournamentButton" type="button">Verwijder</button>
+            <button class="secondary-button" id="lockButton" type="button">Toernooi vastzetten</button>
+            <a class="ghost-button" href="/">Deelnemers</a>
+          </div>
+        </details>
       </div>
     </header>
 
@@ -37,6 +47,11 @@
           <label class="field">
             <span>Naam</span>
             <input id="tournamentName" type="text" autocomplete="off" />
+          </label>
+
+          <label class="field">
+            <span>Datum</span>
+            <input id="tournamentDate" type="date" />
           </label>
 
           <div class="field">

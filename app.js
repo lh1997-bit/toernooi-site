@@ -23,6 +23,28 @@ document.body.classList.toggle("participant-mode", APP_MODE === "participant");
 document.body.classList.toggle("admin-mode", APP_MODE !== "participant");
 document.title = APP_MODE === "participant" ? "Toernooimaker - Deelnemers" : "Toernooimaker - Admin";
 
+function todayISODate() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function validDate(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(new Date(`${value}T12:00:00`).getTime());
+}
+
+function formatProgramDateLabel(value) {
+  if (!validDate(value)) return "Datum onbekend";
+  return new Intl.DateTimeFormat("nl-NL", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date(`${value}T12:00:00`));
+}
+
 const defaultState = () => ({
   id: "tournament-1",
   slug: "",
@@ -31,6 +53,7 @@ const defaultState = () => ({
   settings: {
     name: "Mijn toernooi",
     format: "groups",
+    date: todayISODate(),
     teamCount: 16,
     groupCount: 4,
     advancePerGroup: 2,
@@ -170,6 +193,7 @@ const elements = {
   duplicateTournamentButton: document.querySelector("#duplicateTournamentButton"),
   deleteTournamentButton: document.querySelector("#deleteTournamentButton"),
   tournamentName: document.querySelector("#tournamentName"),
+  tournamentDate: document.querySelector("#tournamentDate"),
   teamCount: document.querySelector("#teamCount"),
   startTime: document.querySelector("#startTime"),
   endTime: document.querySelector("#endTime"),
@@ -1210,6 +1234,10 @@ function renderSetup() {
   const locked = Boolean(state.locked);
   elements.tournamentName.value = state.settings.name;
   elements.tournamentName.disabled = locked;
+  if (elements.tournamentDate) {
+    elements.tournamentDate.value = validDate(state.settings.date) ? state.settings.date : todayISODate();
+    elements.tournamentDate.disabled = locked;
+  }
   elements.teamCount.value = state.settings.teamCount;
   elements.teamCount.disabled = locked;
   elements.startTime.value = state.settings.startTime;
@@ -1298,12 +1326,15 @@ function renderTournament() {
   const tournament = state.tournament;
   const participantTournament = APP_MODE === "participant" ? getParticipantTournament(program) : tournament;
   const knockoutFocus = state.activeView === "knockout" && APP_MODE === "admin";
+  const programFocus = state.activeView === "program" && APP_MODE === "admin";
   document.body.classList.toggle("knockout-focus", knockoutFocus);
+  document.body.classList.toggle("program-focus", programFocus);
   if (elements.setupPanel) {
-    elements.setupPanel.hidden = knockoutFocus;
+    elements.setupPanel.hidden = knockoutFocus || programFocus;
   }
   if (elements.appShell) {
     elements.appShell.classList.toggle("knockout-focus", knockoutFocus);
+    elements.appShell.classList.toggle("program-focus", programFocus);
   }
   if (state.activeView === "program" && APP_MODE !== "participant") {
     elements.workspaceTitle.textContent = "Programma";
@@ -1500,12 +1531,14 @@ function renderProgramTournamentCard(tournament, index) {
   const fieldEnd = fieldStart + Math.max(1, Number(tournament.settings?.fieldCount) || 1) - 1;
   const selected = tournament.id === program.activeTournamentId;
   const publicPath = getTournamentPublicPath(tournament);
+  const dateLabel = formatProgramDateLabel(tournament.settings?.date);
 
   return `
     <article class="program-tournament ${selected ? "is-active" : ""}">
       <div>
         <strong>${escapeHtml(tournament.settings?.name?.trim() || `Toernooi ${index + 1}`)}</strong>
         <p>${escapeHtml(tournament.settings?.format === "groups" ? "Poules met knock-out" : "Leaguefase met knock-out")}</p>
+        <p>${escapeHtml(dateLabel)}</p>
         <p><a class="inline-link" href="${escapeHtml(publicPath)}" target="_blank" rel="noreferrer">${escapeHtml(publicPath)}</a></p>
       </div>
       <div class="program-tournament-meta">
@@ -1534,19 +1567,64 @@ function renderProgramSchedule(rows) {
     `;
   }
 
+  const groups = [];
+  rows.forEach((row) => {
+    const key = row.date || "";
+    const group = groups.find((item) => item.key === key);
+    if (group) {
+      group.rows.push(row);
+    } else {
+      groups.push({ key, rows: [row] });
+    }
+  });
+
+  groups.sort((a, b) => {
+    if (!a.key && !b.key) return 0;
+    if (!a.key) return 1;
+    if (!b.key) return -1;
+    return a.key.localeCompare(b.key);
+  });
+
   return `
-    <div class="program-schedule-list">
-      ${rows
-        .map(
-          (row) => `
-            <article class="program-schedule-row">
-              <div class="program-schedule-time">${escapeHtml(formatScheduleWindow(row.schedule))}</div>
-              <div class="program-schedule-field">Veld ${row.schedule.displayField || row.schedule.field}</div>
-              <div class="program-schedule-title">${escapeHtml(row.tournamentName)}</div>
-              <div class="program-schedule-detail">${escapeHtml(row.detail)}</div>
-            </article>
-          `,
-        )
+    <div class="program-day-list">
+      ${groups
+        .map((group, dayIndex) => {
+          const dayRows = group.rows.sort(
+            (a, b) =>
+              a.schedule.start - b.schedule.start ||
+              a.schedule.displayField - b.schedule.displayField ||
+              a.tournamentName.localeCompare(b.tournamentName, "nl"),
+          );
+          const title = formatProgramDateLabel(group.key);
+          const tournamentsCount = new Set(dayRows.map((row) => row.tournamentId)).size;
+          return `
+            <section class="program-day-card">
+              <div class="section-head program-day-head">
+                <div>
+                  <span class="eyebrow">Dag ${dayIndex + 1}</span>
+                  <h3>${escapeHtml(title)}</h3>
+                </div>
+                <div class="section-actions">
+                  <span class="stage-meta">${dayRows.length} wedstrijden · ${tournamentsCount} toernooi${tournamentsCount === 1 ? "" : "en"}</span>
+                </div>
+              </div>
+              <div class="program-schedule-list">
+                ${dayRows
+                  .map(
+                    (row) => `
+                      <article class="program-schedule-row">
+                        <div class="program-schedule-time">${escapeHtml(formatScheduleWindow(row.schedule))}</div>
+                        <div class="program-schedule-field">Veld ${row.schedule.displayField || row.schedule.field}</div>
+                        <div class="program-schedule-title">${escapeHtml(row.tournamentName)}</div>
+                        <div class="program-schedule-detail">${escapeHtml(row.detail)}</div>
+                      </article>
+                    `,
+                  )
+                  .join("")}
+              </div>
+            </section>
+          `;
+        })
         .join("")}
     </div>
   `;
@@ -1565,6 +1643,7 @@ function summarizeProgramFields() {
 
 function renderProgramView() {
   const programRows = collectProgramScheduleRows();
+  const programDays = new Set(program.tournaments.map((tournament) => tournament.settings?.date).filter(Boolean)).size;
   const cards = program.tournaments
     .map((tournament, index) => renderProgramTournamentCard(tournament, index))
     .join("");
@@ -1577,6 +1656,11 @@ function renderProgramView() {
             <span>Toernooien</span>
             <strong>${program.tournaments.length}</strong>
             <small>Losse opzet per evenement</small>
+          </article>
+          <article class="overview-card">
+            <span>Dagen</span>
+            <strong>${program.tournaments.length ? programDays || 1 : 0}</strong>
+            <small>Programma per datum gegroepeerd</small>
           </article>
           <article class="overview-card">
             <span>Geplande wedstrijden</span>
@@ -2832,6 +2916,9 @@ function renderLeagueBadge(index, options) {
 function normalizeSettings() {
   state.settings.teamCount = clamp(state.settings.teamCount, 2, 64);
   ensureTeamCount(state.settings.teamCount);
+  if (!validDate(state.settings.date)) {
+    state.settings.date = todayISODate();
+  }
 
   if (!validTime(state.settings.startTime)) {
     state.settings.startTime = "09:00";
@@ -3398,6 +3485,7 @@ function collectProgramScheduleRows() {
             tournamentId: tournamentState.id,
             tournamentIndex,
             tournamentName: tournamentState.settings.name || `Toernooi ${tournamentIndex + 1}`,
+            date: tournamentState.settings?.date || "",
             schedule,
             detail: `${block.label} · ${teamName(match?.homeTeamId)} - ${teamName(match?.awayTeamId)}`,
           });
@@ -3409,6 +3497,7 @@ function collectProgramScheduleRows() {
           tournamentId: tournamentState.id,
           tournamentIndex,
           tournamentName: tournamentState.settings.name || `Toernooi ${tournamentIndex + 1}`,
+          date: tournamentState.settings?.date || "",
           schedule,
           detail: `${block.label} · ${teamName(foundTie?.tie.teamAId)} - ${teamName(foundTie?.tie.teamBId)}`,
         });
@@ -3416,7 +3505,13 @@ function collectProgramScheduleRows() {
     });
   });
 
-  return rows.sort((a, b) => a.schedule.start - b.schedule.start || a.schedule.displayField - b.schedule.displayField || a.tournamentName.localeCompare(b.tournamentName, "nl"));
+  return rows.sort(
+    (a, b) =>
+      (a.date || "zzzz").localeCompare(b.date || "zzzz") ||
+      a.schedule.start - b.schedule.start ||
+      a.schedule.displayField - b.schedule.displayField ||
+      a.tournamentName.localeCompare(b.tournamentName, "nl"),
+  );
 }
 
 function findMatchInTournament(tournament, matchId) {
@@ -3911,10 +4006,18 @@ function showStatus(message) {
 }
 
 function renderAll() {
+  const programFocus = APP_MODE === "admin" && state.activeView === "program";
   renderSetup();
   renderTournament();
   updateAuthUi();
   updateWriteGate();
+  document.body.classList.toggle("program-focus", programFocus);
+  if (elements.setupPanel) {
+    elements.setupPanel.hidden = programFocus || document.body.classList.contains("knockout-focus");
+  }
+  if (elements.appShell) {
+    elements.appShell.classList.toggle("program-focus", programFocus);
+  }
 }
 
 function applyLeagueDefaultsForTeamCount() {
@@ -4026,6 +4129,15 @@ if (elements.tournamentName) {
   elements.tournamentName.addEventListener("input", (event) => {
     state.settings.name = event.target.value;
     syncTournamentSlugFromName();
+    persist();
+    renderAll();
+  });
+}
+
+if (elements.tournamentDate) {
+  elements.tournamentDate.addEventListener("change", (event) => {
+    state.settings.date = validDate(event.target.value) ? event.target.value : todayISODate();
+    normalizeSettings();
     persist();
     renderAll();
   });
