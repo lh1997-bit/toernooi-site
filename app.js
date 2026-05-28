@@ -250,12 +250,30 @@ function normalizeProgramState(loaded) {
 
 function normalizeTournamentState(loaded, idFallback) {
   const fresh = defaultState();
+  const teams = Array.isArray(loaded?.teams) && loaded.teams.length
+    ? loaded.teams.map((team, index) => ({
+        id: team?.id || `team-${index + 1}`,
+        name: String(team?.name || "").trim() || `Team ${index + 1}`,
+      }))
+    : fresh.teams;
+  const teamIds = Array.isArray(loaded?.teamIds) && loaded.teamIds.length
+    ? loaded.teamIds.filter(Boolean)
+    : teams.map((team) => team.id);
+  const groups = Array.isArray(loaded?.groups) ? loaded.groups : [];
+  const rounds = Array.isArray(loaded?.rounds) ? loaded.rounds : [];
+  const matches = Array.isArray(loaded?.matches) ? loaded.matches : [];
   return {
     ...fresh,
     ...loaded,
     id: idFallback || loaded?.id || fresh.id,
     slug: loaded?.slug || slugifyTournamentName(loaded?.settings?.name || idFallback || fresh.id),
-    teams: Array.isArray(loaded.teams) && loaded.teams.length ? loaded.teams : fresh.teams,
+    teams,
+    teamIds,
+    groups,
+    rounds,
+    matches,
+    playoff: loaded?.playoff || null,
+    knockout: loaded?.knockout || null,
     activeView: loaded.activeView || fresh.activeView,
     locked: Boolean(loaded.locked),
     settings: {
@@ -1259,7 +1277,10 @@ function renderTournament() {
       return;
     }
 
-    if (!participantTournament) {
+    const participantTournamentRecord = participantTournament;
+    const participantTournamentData = participantTournamentRecord?.tournament || participantTournamentRecord;
+
+    if (!participantTournamentRecord) {
       elements.workspaceTitle.textContent = "Toernooien";
       elements.workspaceFormat.textContent = `${program.tournaments.length} toernooi${program.tournaments.length === 1 ? "" : "en"}`;
       elements.tournamentContent.innerHTML = `
@@ -1282,14 +1303,14 @@ function renderTournament() {
       return;
     }
 
-    currentSchedule = buildScheduleMap(participantTournament);
-    elements.workspaceTitle.textContent = participantTournament.settings?.name || "Maak je toernooi";
+    currentSchedule = buildScheduleMap(participantTournamentData, participantTournamentRecord);
+    elements.workspaceTitle.textContent = participantTournamentRecord.settings?.name || participantTournamentData?.name || "Maak je toernooi";
     elements.workspaceFormat.textContent = participantTournament
-      ? participantTournament.format === "groups"
+      ? participantTournamentData?.format === "groups"
         ? "Poules met knock-out"
         : "Leaguefase met knock-out"
       : "Geen schema";
-    elements.tournamentContent.innerHTML = renderTeamView(participantTournament);
+    elements.tournamentContent.innerHTML = renderTeamView(participantTournamentData || participantTournamentRecord);
     return;
   }
 
@@ -1582,6 +1603,7 @@ function renderParticipantDirectory() {
 
 function renderGroupTournament(tournament) {
   const overview = APP_MODE === "admin" ? renderTournamentOverview(tournament) : "";
+  const groups = Array.isArray(tournament.groups) ? tournament.groups : [];
   if (state.activeView === "team") {
     elements.tournamentContent.innerHTML = renderTeamView(tournament);
     return;
@@ -1596,7 +1618,7 @@ function renderGroupTournament(tournament) {
         </div>
       </div>
       <div class="table-grid">
-        ${tournament.groups.map((group) => renderGroupTableCard(group, tournament.advancePerGroup)).join("")}
+        ${groups.map((group) => renderGroupTableCard(group, tournament.advancePerGroup)).join("")}
       </div>
     `;
     return;
@@ -1610,18 +1632,19 @@ function renderGroupTournament(tournament) {
   elements.tournamentContent.innerHTML = `
     ${overview}
     <div class="group-grid">
-      ${tournament.groups.map(renderGroupMatchCard).join("")}
+      ${groups.map(renderGroupMatchCard).join("")}
     </div>
   `;
 }
 
 function renderGroupMatchCard(group) {
-  const rounds = group.rounds
+  const rounds = Array.isArray(group?.rounds) ? group.rounds : [];
+  const roundsMarkup = rounds
     .map(
       (round, index) => `
         <div class="round-block">
           <h4>Ronde ${index + 1}</h4>
-          ${round.map(renderMatchRow).join("")}
+          ${(Array.isArray(round) ? round : []).map(renderMatchRow).join("")}
         </div>
       `,
     )
@@ -1630,20 +1653,20 @@ function renderGroupMatchCard(group) {
   return `
     <article class="stage-card">
       <header>
-        <h3>${escapeHtml(group.name)}</h3>
-        <span class="stage-meta">${group.teamIds.length} teams</span>
+        <h3>${escapeHtml(group?.name || "Poule")}</h3>
+        <span class="stage-meta">${(group?.teamIds || []).length} teams</span>
       </header>
-      <div class="round-list">${rounds}</div>
+      <div class="round-list">${roundsMarkup}</div>
     </article>
   `;
 }
 
 function renderGroupTableCard(group, advancePerGroup) {
-  const standings = calculateStandings(group.teamIds, group.matches);
+  const standings = calculateStandings(group?.teamIds || [], group?.matches || []);
   return `
     <article class="stage-card">
       <header>
-        <h3>${escapeHtml(group.name)}</h3>
+        <h3>${escapeHtml(group?.name || "Poule")}</h3>
         <span class="stage-meta">Top ${advancePerGroup}</span>
       </header>
       ${renderStandingsTable(standings, {
@@ -1684,6 +1707,7 @@ function renderGroupKnockout(tournament) {
 
 function renderLeagueTournament(tournament) {
   const overview = APP_MODE === "admin" ? renderTournamentOverview(tournament) : "";
+  const rounds = Array.isArray(tournament.rounds) ? tournament.rounds : [];
   if (state.activeView === "team") {
     elements.tournamentContent.innerHTML = renderTeamView(tournament);
     return;
@@ -1694,7 +1718,7 @@ function renderLeagueTournament(tournament) {
     return;
   }
 
-  const standings = calculateStandings(tournament.teamIds, tournament.matches);
+  const standings = calculateStandings(tournament.teamIds || [], tournament.matches || []);
   elements.tournamentContent.innerHTML = `
     ${overview}
     <div class="split-layout">
@@ -1710,22 +1734,34 @@ function renderLeagueTournament(tournament) {
         })}
       </section>
       <section class="match-section">
-        ${renderLeagueRounds(tournament.rounds)}
+        ${renderLeagueRounds(rounds)}
       </section>
     </div>
   `;
 }
 
 function renderLeagueRounds(rounds) {
-  return rounds
+  const safeRounds = Array.isArray(rounds) ? rounds : [];
+  if (!safeRounds.length) {
+    return `
+      <div class="empty-state compact">
+        <div>
+          <h3>Nog geen schema</h3>
+          <p>Genereer eerst de leaguewedstrijden.</p>
+        </div>
+      </div>
+    `;
+  }
+
+  return safeRounds
     .map(
       (round, index) => `
         <article class="stage-card">
           <header>
             <h3>Ronde ${index + 1}</h3>
-            <span class="stage-meta">${round.length} wedstrijden</span>
+            <span class="stage-meta">${Array.isArray(round) ? round.length : 0} wedstrijden</span>
           </header>
-          <div class="round-list">${round.map(renderMatchRow).join("")}</div>
+          <div class="round-list">${(Array.isArray(round) ? round : []).map(renderMatchRow).join("")}</div>
         </article>
       `,
     )
@@ -1991,8 +2027,10 @@ function renderTournamentOverview(tournament) {
 function getTournamentOverview(tournament) {
   const matches = tournament
     ? tournament.format === "groups"
-      ? tournament.groups.flatMap((group) => group.matches)
-      : tournament.matches
+      ? (Array.isArray(tournament.groups) ? tournament.groups : []).flatMap((group) => group.matches || [])
+      : Array.isArray(tournament.matches)
+        ? tournament.matches
+        : []
     : [];
   const completed = matches.filter((match) => match.homeScore !== null && match.awayScore !== null).length;
   const total = matches.length;
@@ -2101,8 +2139,12 @@ function renderTeamScheduleItem(item, selectedTeamId, options = {}) {
 
 function getTournamentTeamIds(tournament) {
   if (!tournament) return state.teams.map((team) => team.id);
-  if (tournament.format === "league") return tournament.teamIds;
-  return tournament.groups.flatMap((group) => group.teamIds);
+  const fallbackTeamIds = (Array.isArray(tournament.teams) ? tournament.teams : state.teams).map((team) => team.id);
+  if (tournament.format === "league") {
+    return Array.isArray(tournament.teamIds) && tournament.teamIds.length ? tournament.teamIds : fallbackTeamIds;
+  }
+  const groups = Array.isArray(tournament.groups) ? tournament.groups : [];
+  return groups.length ? groups.flatMap((group) => group.teamIds || []) : fallbackTeamIds;
 }
 
 function ensureSelectedTeamId(tournament = state.tournament) {
@@ -2115,10 +2157,21 @@ function ensureSelectedTeamId(tournament = state.tournament) {
 
 function getTeamStandingsContext(tournament, teamId) {
   if (tournament.format === "groups") {
-    const group = tournament.groups.find((item) => item.teamIds.includes(teamId)) || tournament.groups[0];
+    const groups = Array.isArray(tournament.groups) ? tournament.groups : [];
+    const fallbackTeamIds = getTournamentTeamIds(tournament);
+    const group = groups.find((item) => (item.teamIds || []).includes(teamId)) || groups[0];
+    if (!group) {
+      return {
+        title: "Stand",
+        standings: calculateStandings(fallbackTeamIds, []),
+        options: {
+          qualifies: (_, index) => index < tournament.advancePerGroup,
+        },
+      };
+    }
     return {
-      title: `${group.name} stand`,
-      standings: calculateStandings(group.teamIds, group.matches),
+      title: `${group.name || "Poule"} stand`,
+      standings: calculateStandings(group.teamIds || [], group.matches || []),
       options: {
         qualifies: (_, index) => index < tournament.advancePerGroup,
       },
@@ -2141,17 +2194,18 @@ function getTeamScheduleItems(tournament, teamId) {
   const knockoutReady = isKnockoutStageReady(tournament);
 
   if (tournament.format === "groups") {
-    tournament.groups.forEach((group) => {
-      group.matches
+    const groups = Array.isArray(tournament.groups) ? tournament.groups : [];
+    groups.forEach((group) => {
+      (group.matches || [])
         .filter((match) => match.homeTeamId === teamId || match.awayTeamId === teamId)
         .forEach((match) => {
-          items.push(createTeamMatchItem(match, teamId, `${group.name} ronde ${match.round}`));
+          items.push(createTeamMatchItem(match, teamId, `${group.name || "Poule"} ronde ${match.round}`));
         });
     });
 
     if (knockoutReady && tournament.knockout) collectTeamTieItems(tournament.knockout, teamId, items);
   } else {
-    tournament.matches
+    (Array.isArray(tournament.matches) ? tournament.matches : [])
       .filter((match) => match.homeTeamId === teamId || match.awayTeamId === teamId)
       .forEach((match) => {
         items.push(createTeamMatchItem(match, teamId, `Leaguefase ronde ${match.round}`));
@@ -2198,7 +2252,7 @@ function collectTeamTieItems(bracket, teamId, items) {
     return;
   }
   updateBracketWinners(bracket);
-  bracket.rounds.forEach((round) => {
+  (Array.isArray(bracket.rounds) ? bracket.rounds : []).forEach((round) => {
     round.ties
       .filter((tie) => tie.teamAId === teamId || tie.teamBId === teamId)
       .forEach((tie) => {
@@ -3153,11 +3207,13 @@ function collectScheduledBlocks(tournament) {
   const knockoutReady = isKnockoutStageReady(tournament);
 
   if (tournament.format === "groups") {
-    const maxRounds = Math.max(...tournament.groups.map((group) => group.rounds.length));
+    const groups = Array.isArray(tournament.groups) ? tournament.groups : [];
+    const maxRounds = groups.length ? Math.max(...groups.map((group) => (group.rounds || []).length)) : 0;
+    if (!maxRounds) return blocks;
     for (let roundIndex = 0; roundIndex < maxRounds; roundIndex += 1) {
       const items = [];
-      tournament.groups.forEach((group) => {
-        (group.rounds[roundIndex] || []).forEach((match) => {
+      groups.forEach((group) => {
+        ((group.rounds || [])[roundIndex] || []).forEach((match) => {
           items.push({ type: "match", id: match.id });
         });
       });
@@ -3170,7 +3226,7 @@ function collectScheduledBlocks(tournament) {
     return blocks;
   }
 
-  tournament.rounds.forEach((round, index) => {
+  (Array.isArray(tournament.rounds) ? tournament.rounds : []).forEach((round, index) => {
     blocks.push({
       label: `League ronde ${index + 1}`,
       items: round.map((match) => ({ type: "match", id: match.id })),
@@ -3214,7 +3270,7 @@ function countBracketMatches(bracket) {
   if (isDoubleKnockoutContainer(bracket)) {
     return countBracketMatches(bracket.winners) + countBracketMatches(bracket.losers);
   }
-  return bracket.rounds.reduce((sum, round) => sum + round.ties.length, 0);
+  return (Array.isArray(bracket.rounds) ? bracket.rounds : []).reduce((sum, round) => sum + (round.ties || []).length, 0);
 }
 
 function forEachBracketTie(bracket, callback) {
@@ -3225,8 +3281,8 @@ function forEachBracketTie(bracket, callback) {
     return;
   }
 
-  bracket.rounds.forEach((round, roundIndex) => {
-    round.ties.forEach((tie, tieIndex) => callback({ bracket, round, roundIndex, tie, tieIndex }));
+  (Array.isArray(bracket.rounds) ? bracket.rounds : []).forEach((round, roundIndex) => {
+    (round.ties || []).forEach((tie, tieIndex) => callback({ bracket, round, roundIndex, tie, tieIndex }));
   });
 }
 
@@ -3245,7 +3301,8 @@ function findTieInBracket(bracket, tieId) {
 function getTournamentMatchCount(tournament) {
   if (!tournament) return 0;
   if (tournament.format === "groups") {
-    const groupMatches = tournament.groups.reduce((sum, group) => sum + group.matches.length, 0);
+    const groups = Array.isArray(tournament.groups) ? tournament.groups : [];
+    const groupMatches = groups.reduce((sum, group) => sum + (group.matches || []).length, 0);
     return groupMatches + countBracketMatches(tournament.knockout);
   }
 
@@ -3298,21 +3355,24 @@ function collectProgramScheduleRows() {
 function findMatchInTournament(tournament, matchId) {
   if (!tournament) return null;
   if (tournament.format === "groups") {
-    return tournament.groups.flatMap((group) => group.matches).find((match) => match.id === matchId) || null;
+    return (Array.isArray(tournament.groups) ? tournament.groups : [])
+      .flatMap((group) => group.matches || [])
+      .find((match) => match.id === matchId) || null;
   }
-  return tournament.matches.find((match) => match.id === matchId) || null;
+  return (Array.isArray(tournament.matches) ? tournament.matches : []).find((match) => match.id === matchId) || null;
 }
 
 function areGroupMatchesComplete(tournament) {
   if (!tournament || tournament.format !== "groups") return false;
-  return tournament.groups.every((group) =>
-    group.matches.every((match) => match.homeScore !== null && match.awayScore !== null),
+  const groups = Array.isArray(tournament.groups) ? tournament.groups : [];
+  return groups.length > 0 && groups.every((group) =>
+    (group.matches || []).every((match) => match.homeScore !== null && match.awayScore !== null),
   );
 }
 
 function areLeagueMatchesComplete(tournament) {
   if (!tournament || tournament.format !== "league") return false;
-  return tournament.matches.every((match) => match.homeScore !== null && match.awayScore !== null);
+  return Array.isArray(tournament.matches) && tournament.matches.every((match) => match.homeScore !== null && match.awayScore !== null);
 }
 
 function isKnockoutStageReady(tournament) {
